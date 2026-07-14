@@ -9,6 +9,7 @@
 [![Python](https://img.shields.io/badge/Python-3.9+-blue?logo=python)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-lululu811/halo--skill-blue?logo=github)](https://github.com/lululu811/halo-skill)
+[![ClawHub](https://img.shields.io/badge/ClawHub-@lululu811/halo-orange?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgMThjLTQuNDEgMC04LTMuNTktOC04czMuNTktOCA4LTggOCAzLjU5IDggOC0zLjU5IDgtOCA4eiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg==)](https://clawhub.ai/lululu811/skills/halo)
 
 **Python锁定每一个数据，AI只做分析判断。数据100%来自API，绝不编造。**
 
@@ -79,8 +80,15 @@ HALO换了一个思路：**数据层和分析层彻底分离**。
 
 ### 安装
 
+**方式一：ClawHub 一键安装（推荐）**
+
 ```bash
-# 克隆到 skills 目录
+npx clawhub install @lululu811/halo
+```
+
+**方式二：Git 克隆**
+
+```bash
 git clone https://github.com/lululu811/halo-skill.git ~/.claude/skills/halo-skill
 
 # 进入目录，建立虚拟环境
