@@ -734,14 +734,11 @@ def fetch_all(code):
 
     # ── Harness 数据层校验 ──
     print("\n  🔍 运行数据层 harness 校验...")
-    try:
-        harness_result = validate_data(code)
-        if not harness_result["ok"]:
-            print(f"  ⚠️ 数据层 harness 未通过，请查看 data/{code}_harness.json")
-            sys.exit(1)
-        print("  ✅ 数据层 harness 通过")
-    except Exception as e:
-        print(f"  ⚠️ harness 运行失败: {e}")
+    harness_result = validate_data(code)
+    if not harness_result["ok"]:
+        print(f"  ⚠️ 数据层 harness 未通过，请查看 data/{code}_harness.json")
+        sys.exit(1)
+    print("  ✅ 数据层 harness 通过")
 
     return result
 

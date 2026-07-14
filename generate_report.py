@@ -877,14 +877,11 @@ if __name__ == "__main__":
 
     # ── Harness 骨架层校验 ──
     print("  🔍 运行骨架层 harness 校验...")
-    try:
-        harness_result = validate_skeleton(stock_code)
-        if not harness_result["ok"]:
-            print(f"  ⚠️ 骨架层 harness 未通过，请查看 reports/{stock_code}_harness.json")
-            sys.exit(1)
-        print("  ✅ 骨架层 harness 通过")
-    except Exception as e:
-        print(f"  ⚠️ harness 运行失败: {e}")
+    harness_result = validate_skeleton(stock_code)
+    if not harness_result["ok"]:
+        print(f"  ⚠️ 骨架层 harness 未通过，请查看 reports/{stock_code}_harness.json")
+        sys.exit(1)
+    print("  ✅ 骨架层 harness 通过")
 
     # 统计 AI 槽位数量
     ai_slots = skeleton.count("{{AI_")

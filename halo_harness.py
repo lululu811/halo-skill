@@ -58,7 +58,7 @@ class Harness:
         return {
             "code": self.code,
             "layer": self.layer,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
             "ok": self.ok(),
             "checks": self.checks,
             "warnings": self.warnings,
@@ -94,13 +94,22 @@ def _print_summary(harness):
 
 # ── 评分复算工具 ──
 
+def _safe_float(value, default=None):
+    """安全转换为 float；失败时返回 default"""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
 def _dim_value(dims, key):
-    """读取维度原始值；键存在但 value 缺失/为 None 时返回 None"""
+    """读取维度原始值；键存在但 value 缺失/为 None/非数字时返回 None"""
     item = dims.get(key, {})
     if not isinstance(item, dict):
         return None
-    val = item.get("value")
-    return None if val is None else float(val)
+    return _safe_float(item.get("value"))
 
 
 def _score_halo_dimensions(halo):
@@ -154,10 +163,10 @@ def _score_halo_dimensions(halo):
 
     # Capex负担：与 generate_report.py 一致，使用 raw.capex_yi / ocf_yi
     raw = halo.get("raw", {})
-    capex = raw.get("capex_yi", 0)
-    ocf = raw.get("ocf_yi", 0)
-    if ocf and float(ocf) > 0 and capex is not None:
-        burden = float(capex) / float(ocf) * 100
+    capex = _safe_float(raw.get("capex_yi"))
+    ocf = _safe_float(raw.get("ocf_yi"))
+    if ocf is not None and ocf > 0 and capex is not None:
+        burden = capex / ocf * 100
     else:
         burden = 999
     thresholds = [(5, 5), (15, 4), (30, 3), (50, 2), (0, 1)]
@@ -193,7 +202,7 @@ def _recalc_halo_score(halo):
 def _recalc_growth_score(growth, ratios):
     """独立复算成长性总分"""
     # 4.1 营收增长
-    rev_yoy = growth.get("revenue_yoy", 0)
+    rev_yoy = _safe_float(growth.get("revenue_yoy"), 0)
     if rev_yoy > 30:
         s_rev = 9
     elif rev_yoy > 15:
@@ -206,7 +215,7 @@ def _recalc_growth_score(growth, ratios):
         s_rev = 2
 
     # 4.2 利润增长
-    np_yoy = growth.get("net_profit_yoy", 0)
+    np_yoy = _safe_float(growth.get("net_profit_yoy"), 0)
     if np_yoy > 30:
         s_np = 9
     elif np_yoy > 15:
@@ -219,8 +228,8 @@ def _recalc_growth_score(growth, ratios):
         s_np = 2
 
     # 4.3 增长质量
-    cf_ratio = ratios.get("cf_to_profit", 0)
-    debt = ratios.get("debt_ratio", 0)
+    cf_ratio = _safe_float(ratios.get("cf_to_profit"), 0)
+    debt = _safe_float(ratios.get("debt_ratio"), 0)
     quality = 5
     if cf_ratio > 0.8:
         quality += 1
@@ -233,7 +242,7 @@ def _recalc_growth_score(growth, ratios):
     s_quality = max(1, min(10, quality))
 
     # 4.4 增长持续性
-    annual_rev_yoy = growth.get("annual_revenue_yoy", 0)
+    annual_rev_yoy = _safe_float(growth.get("annual_revenue_yoy"), 0)
     sustain = 5
     if annual_rev_yoy > 10:
         sustain += 1
@@ -259,8 +268,14 @@ def validate_data(code):
         _print_summary(h)
         return h.report()
 
-    with open(data_path, "r", encoding="utf-8") as f:
-        d = json.load(f)
+    try:
+        with open(data_path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except json.JSONDecodeError as e:
+        h.check("JSON 文件可解析", False, detail=f"{data_path} 解析失败: {e}", level="error")
+        _save_report(h)
+        _print_summary(h)
+        return h.report()
 
     # 2. meta 字段完整
     meta = d.get("meta", {})
@@ -274,9 +289,17 @@ def validate_data(code):
     has_market = all(k in market for k in required_market)
     h.check("行情数据字段完整", has_market, detail=f"缺失: {[k for k in required_market if k not in market]}")
     if has_market:
-        h.check("行情数值合理",
-                market["price"] > 0 and market["pe_ttm"] > 0 and market["pb"] > 0 and market["mcap_yi"] > 0,
-                detail=f"price={market['price']}, pe={market['pe_ttm']}, pb={market['pb']}, mcap={market['mcap_yi']}")
+        price = _safe_float(market.get("price"))
+        pe = _safe_float(market.get("pe_ttm"))
+        pb = _safe_float(market.get("pb"))
+        mcap = _safe_float(market.get("mcap_yi"))
+        all_positive = all(v is not None and v > 0 for v in (price, pe, pb, mcap))
+        h.check("行情数值合理", all_positive,
+                detail=f"price={market.get('price')}, pe={market.get('pe_ttm')}, pb={market.get('pb')}, mcap={market.get('mcap_yi')}")
+        if not all_positive:
+            h.check("行情数值类型合法",
+                    all(v is not None for v in (price, pe, pb, mcap)),
+                    detail="存在非数字行情字段", level="warning")
 
     # 4. 财报三表期数
     financial = d.get("financial", {})
@@ -313,8 +336,8 @@ def validate_data(code):
     h.check("关键财务比率存在", has_ratios,
             detail=f"缺失: {[k for k in required_ratios if k not in ratios]}", level="warning")
     if has_ratios:
-        debt = ratios.get("debt_ratio", 0)
-        h.check("负债率合理", 0 <= debt <= 100, detail=f"debt_ratio={debt}", level="warning")
+        debt = _safe_float(ratios.get("debt_ratio"), 0)
+        h.check("负债率合理", 0 <= debt <= 100, detail=f"debt_ratio={ratios.get('debt_ratio')}", level="warning")
 
     # 8. 成长性字段
     growth = d.get("growth", {})
@@ -324,19 +347,24 @@ def validate_data(code):
             level="warning")
 
     # 9. 评分计算复核（允许 ±0.1 浮点误差）
-    json_halo_total = halo.get("total_score")
-    json_growth_total = growth.get("total_score")
+    json_halo_total = _safe_float(halo.get("total_score"))
+    json_growth_total = _safe_float(growth.get("total_score"))
     recalc_halo = _recalc_halo_score(halo) if has_dims and has_burden_raw and asset_type else None
     recalc_growth = _recalc_growth_score(growth, ratios) if has_growth and has_ratios else None
 
-    # 若核心维度存在但 value 缺失，则无法复算，作为 warning 提示
+    # 若核心维度存在但 value 缺失/非法，则无法复算，作为 warning 提示并列出具体维度
     if recalc_halo is None and has_dims and has_burden_raw and asset_type:
+        missing_or_invalid = []
+        for k in required_dims:
+            v = _dim_value(dims, k)
+            if v is None:
+                missing_or_invalid.append(k)
         h.check("HALO 评分可复算", False,
-                detail="存在维度原始值缺失或非法", level="warning")
+                detail=f"维度原始值缺失或非法: {missing_or_invalid}", level="warning")
 
     if json_halo_total is not None and recalc_halo is not None:
         h.check("HALO 评分复算一致",
-                abs(float(json_halo_total) - recalc_halo) <= 0.1,
+                abs(json_halo_total - recalc_halo) <= 0.1,
                 detail=f"JSON={json_halo_total}, 复算={recalc_halo:.2f}")
     elif recalc_halo is not None:
         h.check("HALO 总分已复算", True,
@@ -344,11 +372,19 @@ def validate_data(code):
 
     if json_growth_total is not None and recalc_growth is not None:
         h.check("成长性评分复算一致",
-                abs(float(json_growth_total) - recalc_growth) <= 0.1,
+                abs(json_growth_total - recalc_growth) <= 0.1,
                 detail=f"JSON={json_growth_total}, 复算={recalc_growth:.2f}")
     elif recalc_growth is not None:
         h.check("成长性总分已复算", True,
                 detail=f"JSON 未存储 total_score, 复算={recalc_growth:.2f}")
+
+    # 9.1 成长性/比率缺失导致无法复算时给出警告
+    if not has_growth:
+        h.check("成长性评分已复算", False,
+                detail="缺少 revenue_yoy 或 net_profit_yoy，跳过成长性评分复算", level="warning")
+    if not has_ratios:
+        h.check("成长性质量已复算", False,
+                detail="缺少关键财务比率，跳过增长质量/持续性复算", level="warning")
 
     # 10. 资金流数据（warning）
     fund_flow = d.get("fund_flow", [])
@@ -396,25 +432,51 @@ def validate_skeleton(code):
 
         if d is not None:
             market = d.get("market", {})
-            price = market.get("price")
-            pe = market.get("pe_ttm")
+            price = _safe_float(market.get("price"))
+            pe = _safe_float(market.get("pe_ttm"))
             halo = d.get("halo", {})
-            halo_total = halo.get("total_score")
             growth = d.get("growth", {})
-            growth_total = growth.get("total_score")
+            ratios = d.get("ratios", {})
 
-            h.check("骨架中价格与 JSON 一致",
-                    price is None or _find_number_in_text(skeleton, price),
-                    detail=f"JSON price={price}", level="error")
-            h.check("骨架中 PE 与 JSON 一致",
-                    pe is None or _find_number_in_text(skeleton, pe),
-                    detail=f"JSON pe_ttm={pe}", level="error")
-            h.check("骨架中 HALO 总分与 JSON 一致",
-                    halo_total is None or _find_number_in_text(skeleton, halo_total),
-                    detail=f"JSON halo_total={halo_total}", level="error")
-            h.check("骨架中成长分与 JSON 一致",
-                    growth_total is None or _find_number_in_text(skeleton, growth_total),
-                    detail=f"JSON growth_total={growth_total}", level="error")
+            # 复算前提
+            dims = halo.get("dimensions", {})
+            required_dims = ["tangible_intensity", "fixed_intensity", "fixed_share", "capital_labor", "capex_intensity"]
+            has_dims = all(k in dims for k in required_dims)
+            raw = halo.get("raw", {})
+            has_burden_raw = all(k in raw for k in ["capex_yi", "ocf_yi"])
+            asset_type = halo.get("asset_type", "")
+            has_growth = "revenue_yoy" in growth and "net_profit_yoy" in growth
+            required_ratios = ["cf_to_profit", "debt_ratio"]
+            has_ratios = all(k in ratios for k in required_ratios)
+
+            # 当 JSON 未存储 total_score 时，用复算值与骨架比对
+            recalc_halo_total = _recalc_halo_score(halo) if has_dims and has_burden_raw and asset_type else None
+            recalc_growth_total = _recalc_growth_score(growth, ratios) if has_growth and has_ratios else None
+
+            if price is not None:
+                h.check("骨架中价格与 JSON 一致",
+                        _find_number_in_text(skeleton, price),
+                        detail=f"JSON price={price}", level="error")
+            if pe is not None:
+                h.check("骨架中 PE 与 JSON 一致",
+                        _find_number_in_text(skeleton, pe),
+                        detail=f"JSON pe_ttm={pe}", level="error")
+
+            if recalc_halo_total is not None:
+                h.check("骨架中 HALO 总分与 JSON 一致",
+                        _find_number_in_text(skeleton, recalc_halo_total),
+                        detail=f"复算 halo_total={recalc_halo_total:.2f}", level="error")
+            else:
+                h.check("骨架中 HALO 总分可校验", False,
+                        detail="HALO 维度数据不足，无法复算总分", level="warning")
+
+            if recalc_growth_total is not None:
+                h.check("骨架中成长分与 JSON 一致",
+                        _find_number_in_text(skeleton, recalc_growth_total),
+                        detail=f"复算 growth_total={recalc_growth_total:.2f}", level="error")
+            else:
+                h.check("骨架中成长分可校验", False,
+                        detail="成长性/比率数据不足，无法复算总分", level="warning")
     else:
         h.check("数据文件存在", False,
                 detail=f"{data_path} 不存在，跳过数字一致性校验", level="warning")
@@ -465,7 +527,7 @@ def run_harness(code):
     skeleton_result = validate_skeleton(code)
     return {
         "code": code,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
         "ok": data_result["ok"] and skeleton_result["ok"],
         "data_layer": data_result,
         "skeleton_layer": skeleton_result,
