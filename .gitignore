@@ -23,6 +23,9 @@ Thumbs.db
 # OMC internal
 .omc/
 
+# Worktrees
+.worktrees/
+
 # Baseline (鲁班打磨用，不需要发布)
 baseline/
 
