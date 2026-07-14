@@ -9,6 +9,7 @@ import os
 import re
 import sys
 from datetime import datetime
+from halo_thresholds import score_halo_dimensions, calc_halo_total, score_growth
 
 
 # ── 路径工具 ──
@@ -92,7 +93,7 @@ def _print_summary(harness):
     print(f"  结果: {status} ({len(harness.errors)} errors, {len(harness.warnings)} warnings)")
 
 
-# ── 评分复算工具 ──
+# ── 评分复算工具（保留简单工具函数，阈值逻辑已迁移到 halo_thresholds） ──
 
 def _safe_float(value, default=None):
     """安全转换为 float；失败时返回 default"""
@@ -110,148 +111,6 @@ def _dim_value(dims, key):
     if not isinstance(item, dict):
         return None
     return _safe_float(item.get("value"))
-
-
-def _score_halo_dimensions(halo):
-    """根据 dimension 原始值复算六维得分（与 generate_report.py 阈值一致）"""
-    dims = halo.get("dimensions", {})
-    at = halo.get("asset_type", "mixed")
-
-    # 有形资产密集度
-    ti = _dim_value(dims, "tangible_intensity")
-    if at == "heavy":
-        thresholds = [(80, 5), (60, 4), (40, 3), (20, 2), (0, 1)]
-    elif at == "mixed":
-        thresholds = [(70, 5), (50, 4), (30, 3), (15, 2), (0, 1)]
-    else:
-        thresholds = [(60, 5), (40, 4), (20, 3), (10, 2), (0, 1)]
-    s_ti = next((s for t, s in thresholds if ti >= t), 1) if ti is not None else None
-
-    # 固定资产密集度
-    fi = _dim_value(dims, "fixed_intensity")
-    if at == "heavy":
-        thresholds = [(100, 5), (80, 4), (60, 3), (0, 2)]
-    elif at == "mixed":
-        thresholds = [(60, 5), (40, 4), (20, 3), (0, 2)]
-    else:
-        thresholds = [(30, 5), (15, 4), (5, 3), (0, 2)]
-    s_fi = next((s for t, s in thresholds if fi >= t), 1) if fi is not None else None
-
-    # 固定资产份额
-    fs = _dim_value(dims, "fixed_share")
-    thresholds = [(25, 5), (15, 4), (8, 3), (4, 2), (0, 1)]
-    s_fs = next((s for t, s in thresholds if fs >= t), 1) if fs is not None else None
-
-    # 资本-劳动力比率
-    cl = _dim_value(dims, "capital_labor")
-    thresholds = [(200, 5), (100, 4), (50, 3), (20, 2), (0, 1)]
-    s_cl = next((s for t, s in thresholds if cl >= t), 1) if cl is not None else None
-
-    # Capex密集度
-    ci = _dim_value(dims, "capex_intensity")
-    if at == "heavy":
-        thresholds = [(15, 5), (10, 4), (5, 3), (0, 2)]
-    elif at == "mixed":
-        thresholds = [(10, 5), (5, 4), (2, 3), (0, 2)]
-    else:
-        thresholds = [(5, 5), (2, 4), (0.5, 3), (0, 2)]
-    s_ci = next((s for t, s in thresholds if ci >= t), 1) if ci is not None else None
-
-    # 任一核心维度原始值缺失均无法复算
-    if None in (s_ti, s_fi, s_fs, s_cl, s_ci):
-        return None
-
-    # Capex负担：与 generate_report.py 一致，使用 raw.capex_yi / ocf_yi
-    raw = halo.get("raw", {})
-    capex = _safe_float(raw.get("capex_yi"))
-    ocf = _safe_float(raw.get("ocf_yi"))
-    if ocf is not None and ocf > 0 and capex is not None:
-        burden = capex / ocf * 100
-    else:
-        burden = 999
-    thresholds = [(5, 5), (15, 4), (30, 3), (50, 2), (0, 1)]
-    s_cb = 1 if burden > 100 else next((s for t, s in thresholds if burden <= t), 1)
-
-    return {
-        "tangible_intensity": s_ti,
-        "fixed_intensity": s_fi,
-        "fixed_share": s_fs,
-        "capital_labor": s_cl,
-        "capex_intensity": s_ci,
-        "capex_burden": s_cb,
-    }
-
-
-def _recalc_halo_score(halo):
-    """独立复算 HALO 总分"""
-    dim_scores = _score_halo_dimensions(halo)
-    if dim_scores is None:
-        return None
-    weights = {
-        "tangible_intensity": 0.20,
-        "fixed_intensity": 0.15,
-        "fixed_share": 0.15,
-        "capital_labor": 0.15,
-        "capex_intensity": 0.15,
-        "capex_burden": 0.20,
-    }
-    total = sum(dim_scores[name] * weight for name, weight in weights.items())
-    return round(total, 2)
-
-
-def _recalc_growth_score(growth, ratios):
-    """独立复算成长性总分"""
-    # 4.1 营收增长
-    rev_yoy = _safe_float(growth.get("revenue_yoy"), 0)
-    if rev_yoy > 30:
-        s_rev = 9
-    elif rev_yoy > 15:
-        s_rev = 7
-    elif rev_yoy > 5:
-        s_rev = 5
-    elif rev_yoy > 0:
-        s_rev = 3
-    else:
-        s_rev = 2
-
-    # 4.2 利润增长
-    np_yoy = _safe_float(growth.get("net_profit_yoy"), 0)
-    if np_yoy > 30:
-        s_np = 9
-    elif np_yoy > 15:
-        s_np = 7
-    elif np_yoy > 5:
-        s_np = 5
-    elif np_yoy > 0:
-        s_np = 3
-    else:
-        s_np = 2
-
-    # 4.3 增长质量
-    cf_ratio = _safe_float(ratios.get("cf_to_profit"), 0)
-    debt = _safe_float(ratios.get("debt_ratio"), 0)
-    quality = 5
-    if cf_ratio > 0.8:
-        quality += 1
-    if debt < 40:
-        quality += 1
-    if debt > 70:
-        quality -= 2
-    if cf_ratio < 0:
-        quality -= 2
-    s_quality = max(1, min(10, quality))
-
-    # 4.4 增长持续性
-    annual_rev_yoy = _safe_float(growth.get("annual_revenue_yoy"), 0)
-    sustain = 5
-    if annual_rev_yoy > 10:
-        sustain += 1
-    if annual_rev_yoy < 0:
-        sustain -= 1
-    s_sustain = max(1, min(10, sustain))
-
-    total = (s_rev + s_np + s_quality + s_sustain) / 4
-    return round(total, 1)
 
 
 # ── 入口函数 ──
@@ -346,11 +205,12 @@ def validate_data(code):
             detail=f"缺失: revenue_yoy={growth.get('revenue_yoy')}, net_profit_yoy={growth.get('net_profit_yoy')}",
             level="warning")
 
-    # 9. 评分计算复核（允许 ±0.1 浮点误差）
+    # 9. 评分计算复核（允许 ±0.1 浮点误差）— 使用 halo_thresholds 共享阈值
     json_halo_total = _safe_float(halo.get("total_score"))
     json_growth_total = _safe_float(growth.get("total_score"))
-    recalc_halo = _recalc_halo_score(halo) if has_dims and has_burden_raw and asset_type else None
-    recalc_growth = _recalc_growth_score(growth, ratios) if has_growth and has_ratios else None
+    dim_scores = score_halo_dimensions(halo) if has_dims and has_burden_raw and asset_type else None
+    recalc_halo = calc_halo_total(dim_scores) if dim_scores is not None else None
+    recalc_growth = score_growth(growth, ratios) if has_growth and has_ratios else None
 
     # 若核心维度存在但 value 缺失/非法，则无法复算，作为 warning 提示并列出具体维度
     if recalc_halo is None and has_dims and has_burden_raw and asset_type:
@@ -449,9 +309,10 @@ def validate_skeleton(code):
             required_ratios = ["cf_to_profit", "debt_ratio"]
             has_ratios = all(k in ratios for k in required_ratios)
 
-            # 当 JSON 未存储 total_score 时，用复算值与骨架比对
-            recalc_halo_total = _recalc_halo_score(halo) if has_dims and has_burden_raw and asset_type else None
-            recalc_growth_total = _recalc_growth_score(growth, ratios) if has_growth and has_ratios else None
+            # 当 JSON 未存储 total_score 时，用复算值与骨架比对 — 使用 halo_thresholds 共享阈值
+            dim_scores = score_halo_dimensions(halo) if has_dims and has_burden_raw and asset_type else None
+            recalc_halo_total = calc_halo_total(dim_scores) if dim_scores is not None else None
+            recalc_growth_total = score_growth(growth, ratios) if has_growth and has_ratios else None
             json_halo_total = _safe_float(halo.get("total_score"))
             json_growth_total = _safe_float(growth.get("total_score"))
 

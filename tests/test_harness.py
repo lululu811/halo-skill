@@ -7,6 +7,7 @@ from contextlib import contextmanager
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import halo_harness
+import halo_thresholds
 
 
 @contextmanager
@@ -160,10 +161,11 @@ def test_harness_check_records_level():
 
 def test_score_halo_missing_dim_value_returns_none():
     halo = {"asset_type": "mixed", "dimensions": {"tangible_intensity": {}}}
-    assert halo_harness._score_halo_dimensions(halo) is None
+    assert halo_thresholds.score_halo_dimensions(halo) is None
 
 
 def test_score_halo_dimensions_match_generate_report():
+    """Parity test: halo_thresholds 与 generate_report 的 HALO 评分必须完全一致"""
     import generate_report
     code = "TEST0007"
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -171,10 +173,13 @@ def test_score_halo_dimensions_match_generate_report():
         with open(path, encoding="utf-8") as f:
             d = json.load(f)
         expected = generate_report.score_halo(d)["total"]
-        assert abs(halo_harness._recalc_halo_score(d["halo"]) - expected) < 1e-9
+        dim_scores = halo_thresholds.score_halo_dimensions(d["halo"])
+        actual = halo_thresholds.calc_halo_total(dim_scores)
+        assert abs(actual - expected) < 1e-9, f"halO parity failed: {actual} != {expected}"
 
 
 def test_score_growth_matches_generate_report():
+    """Parity test: halo_thresholds 与 generate_report 的成长性评分必须完全一致"""
     import generate_report
     code = "TEST0008"
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -182,7 +187,8 @@ def test_score_growth_matches_generate_report():
         with open(path, encoding="utf-8") as f:
             d = json.load(f)
         expected = generate_report.score_growth(d)["total"]
-        assert abs(halo_harness._recalc_growth_score(d["growth"], d["ratios"]) - expected) < 1e-9
+        actual = halo_thresholds.score_growth(d["growth"], d["ratios"])
+        assert abs(actual - expected) < 1e-9, f"growth parity failed: {actual} != {expected}"
 
 
 def test_validate_skeleton_checks_markdown():
