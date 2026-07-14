@@ -18,6 +18,9 @@ import urllib.request
 import requests
 from datetime import datetime
 
+# Harness 数据校验
+from halo_harness import validate_data
+
 # ══════════════════════════════════════════
 #  全局配置
 # ══════════════════════════════════════════
@@ -728,6 +731,17 @@ def fetch_all(code):
     print(f"  📊 文件大小: {os.path.getsize(output_file)/1024:.1f} KB")
     print(f"  📅 最新报告期: {result['meta']['data_quality']['latest_period']}")
     print(f"{'='*60}\n")
+
+    # ── Harness 数据层校验 ──
+    print("\n  🔍 运行数据层 harness 校验...")
+    try:
+        harness_result = validate_data(code)
+        if not harness_result["ok"]:
+            print(f"  ⚠️ 数据层 harness 未通过，请查看 data/{code}_harness.json")
+            sys.exit(1)
+        print("  ✅ 数据层 harness 通过")
+    except Exception as e:
+        print(f"  ⚠️ harness 运行失败: {e}")
 
     return result
 

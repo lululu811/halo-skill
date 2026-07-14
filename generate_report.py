@@ -10,6 +10,9 @@ HALO V5.0 报告骨架生成器
 import json, os, sys
 from datetime import datetime
 
+# Harness 骨架校验
+from halo_harness import validate_skeleton
+
 
 def fmt_yi(v):
     """格式化亿元（输入单位：元）"""
@@ -871,6 +874,17 @@ if __name__ == "__main__":
     output_path = os.path.join(reports_dir, f"{stock_code}_skeleton.md")
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(skeleton)
+
+    # ── Harness 骨架层校验 ──
+    print("  🔍 运行骨架层 harness 校验...")
+    try:
+        harness_result = validate_skeleton(stock_code)
+        if not harness_result["ok"]:
+            print(f"  ⚠️ 骨架层 harness 未通过，请查看 reports/{stock_code}_harness.json")
+            sys.exit(1)
+        print("  ✅ 骨架层 harness 通过")
+    except Exception as e:
+        print(f"  ⚠️ harness 运行失败: {e}")
 
     # 统计 AI 槽位数量
     ai_slots = skeleton.count("{{AI_")
