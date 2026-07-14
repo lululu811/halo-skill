@@ -79,8 +79,78 @@ def test_score_growth_matches_generate_report():
 def test_validate_skeleton_checks_markdown():
     # 假设 reports/000100_skeleton.md 已存在
     result = halo_harness.validate_skeleton("000100")
-    check_names = [c["name"] for c in result["checks"]]
-    assert "骨架文件存在" in check_names
+    checks = {c["name"]: c for c in result["checks"]}
+    assert "骨架文件存在" in checks
+    assert checks["骨架文件存在"]["passed"] is True
+    assert checks["骨架文件存在"]["level"] == "error"
+    assert "无残留数据占位符" in checks
+    assert checks["无残留数据占位符"]["level"] == "error"
+
+
+def test_validate_skeleton_detects_leftover_placeholders(tmp_path, monkeypatch):
+    # 创建临时骨架，包含残留数据占位符
+    code = "FAKE9999"
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    skeleton_path = reports_dir / f"{code}_skeleton.md"
+    skeleton_path.write_text("# 报告\n价格: {{PRICE}} 元\nPE: {{PE_TTM}}\n{{AI_SUMMARY}}\n", encoding="utf-8")
+
+    # 构造一份可解析的最小 JSON，使关键数字校验能执行
+    data_path = data_dir / f"{code}.json"
+    data_path.write_text(json.dumps({
+        "meta": {"stock_code": code, "stock_name": "测试", "fetch_time": "2026-07-14"},
+        "market": {"price": 99.99, "pe_ttm": 25.5, "pb": 3.0, "mcap_yi": 100},
+        "halo": {"asset_type": "mixed", "total_score": 3.5, "dimensions": {}, "raw": {}},
+        "growth": {"total_score": 5.5},
+    }), encoding="utf-8")
+
+    monkeypatch.setattr(halo_harness, "_project_root", lambda: str(tmp_path))
+    result = halo_harness.validate_skeleton(code)
+    checks = {c["name"]: c for c in result["checks"]}
+    assert checks["骨架文件存在"]["passed"] is True
+    assert checks["无残留数据占位符"]["passed"] is False
+    assert checks["无残留数据占位符"]["level"] == "error"
+    assert "{{PRICE}}" in checks["无残留数据占位符"]["detail"]
+
+
+def test_validate_skeleton_corrupt_json_logs_error(tmp_path, monkeypatch):
+    code = "FAKE9998"
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    skeleton_path = reports_dir / f"{code}_skeleton.md"
+    skeleton_path.write_text("# 报告\n价格: 99.99 元\n", encoding="utf-8")
+
+    data_path = data_dir / f"{code}.json"
+    data_path.write_text("{ 这不是合法 JSON", encoding="utf-8")
+
+    monkeypatch.setattr(halo_harness, "_project_root", lambda: str(tmp_path))
+    result = halo_harness.validate_skeleton(code)
+    checks = {c["name"]: c for c in result["checks"]}
+    assert checks["JSON 文件可解析"]["passed"] is False
+    assert checks["JSON 文件可解析"]["level"] == "error"
+
+
+def test_validate_skeleton_missing_data_file_warns(tmp_path, monkeypatch):
+    code = "FAKE9997"
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    skeleton_path = reports_dir / f"{code}_skeleton.md"
+    skeleton_path.write_text("# 报告\n", encoding="utf-8")
+
+    monkeypatch.setattr(halo_harness, "_project_root", lambda: str(tmp_path))
+    result = halo_harness.validate_skeleton(code)
+    checks = {c["name"]: c for c in result["checks"]}
+    assert checks["数据文件存在"]["passed"] is False
+    assert checks["数据文件存在"]["level"] == "warning"
 
 
 if __name__ == "__main__":

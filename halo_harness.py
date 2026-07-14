@@ -368,7 +368,7 @@ def validate_skeleton(code):
 
     # 1. 文件存在且非空
     exists = os.path.exists(skeleton_path) and os.path.getsize(skeleton_path) > 0
-    h.check("骨架文件存在", exists, detail=f"路径: {skeleton_path}")
+    h.check("骨架文件存在", exists, detail=f"路径: {skeleton_path}", level="error")
     if not exists:
         _save_report(h)
         _print_summary(h)
@@ -382,32 +382,42 @@ def validate_skeleton(code):
     allowed = {"{{AI_", "{{SERENITY_"}
     leftover = [p for p in unknown_placeholders if not any(p.startswith(a) for a in allowed)]
     h.check("无残留数据占位符", len(leftover) == 0,
-            detail=f"残留: {leftover[:5]}")
+            detail=f"残留: {leftover[:5]}", level="error")
 
     # 3. 关键数字与 JSON 一致
     if os.path.exists(data_path):
-        with open(data_path, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        market = d.get("market", {})
-        price = market.get("price")
-        pe = market.get("pe_ttm")
-        halo = d.get("halo", {})
-        halo_total = halo.get("total_score")
-        growth = d.get("growth", {})
-        growth_total = growth.get("total_score")
+        try:
+            with open(data_path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except json.JSONDecodeError as e:
+            h.check("JSON 文件可解析", False,
+                    detail=f"{data_path} 解析失败: {e}", level="error")
+            d = None
 
-        h.check("骨架中价格与 JSON 一致",
-                price is None or _find_number_in_text(skeleton, price),
-                detail=f"JSON price={price}")
-        h.check("骨架中 PE 与 JSON 一致",
-                pe is None or _find_number_in_text(skeleton, pe),
-                detail=f"JSON pe_ttm={pe}")
-        h.check("骨架中 HALO 总分与 JSON 一致",
-                halo_total is None or _find_number_in_text(skeleton, halo_total),
-                detail=f"JSON halo_total={halo_total}")
-        h.check("骨架中成长分与 JSON 一致",
-                growth_total is None or _find_number_in_text(skeleton, growth_total),
-                detail=f"JSON growth_total={growth_total}")
+        if d is not None:
+            market = d.get("market", {})
+            price = market.get("price")
+            pe = market.get("pe_ttm")
+            halo = d.get("halo", {})
+            halo_total = halo.get("total_score")
+            growth = d.get("growth", {})
+            growth_total = growth.get("total_score")
+
+            h.check("骨架中价格与 JSON 一致",
+                    price is None or _find_number_in_text(skeleton, price),
+                    detail=f"JSON price={price}", level="error")
+            h.check("骨架中 PE 与 JSON 一致",
+                    pe is None or _find_number_in_text(skeleton, pe),
+                    detail=f"JSON pe_ttm={pe}", level="error")
+            h.check("骨架中 HALO 总分与 JSON 一致",
+                    halo_total is None or _find_number_in_text(skeleton, halo_total),
+                    detail=f"JSON halo_total={halo_total}", level="error")
+            h.check("骨架中成长分与 JSON 一致",
+                    growth_total is None or _find_number_in_text(skeleton, growth_total),
+                    detail=f"JSON growth_total={growth_total}", level="error")
+    else:
+        h.check("数据文件存在", False,
+                detail=f"{data_path} 不存在，跳过数字一致性校验", level="warning")
 
     # 4. 免责声明和有效期
     h.check("包含免责声明", "免责声明" in skeleton, level="warning")
