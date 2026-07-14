@@ -63,11 +63,27 @@ HALO换了一个思路：**数据层和分析层彻底分离**。
 
 **真实案例**（可直接查看）：
 
-| 股票 | 报告 | 数据量 | HALO评分 | 综合评级 |
-|:-----|:-----|:------:|:--------:|:--------:|
-| 贵州茅台(600519) | [查看](reports/600519_halo_v5.md) | 112KB JSON | 3.55/5.0 🟡 | 增持 |
-| 亨通光电(600487) | [查看](reports/600487_halo_v5.md) | 125KB JSON | 3.20/5.0 🟡 | 中性 |
-| 稳健医疗(300888) | [查看](reports/300888_skeleton.md) | 112KB JSON | 3.05/5.0 🟡 | 骨架 |
+| 股票 | 类型 | 报告 | HALO评分 | 综合评级 |
+|:-----|:----:|:-----|:--------:|:--------:|
+| TCL科技(000100) | 混合型 | [查看](reports/000100_halo_v5.md) | 4.2/5.0 🟢极强 | 中性偏积极 |
+| 贵州茅台(600519) | 轻资产 | [骨架](reports/600519_skeleton.md) | 3.55/5.0 🟡强 | 增持 |
+| 亨通光电(600487) | 混合型 | [骨架](reports/600487_skeleton.md) | 3.20/5.0 🟡强 | 中性 |
+| 稳健医疗(300888) | 轻资产 | [骨架](reports/300888_skeleton.md) | 3.05/5.0 🟡强 | 骨架 |
+
+---
+
+## 🆕 What's New
+
+**v1.1（2026-07-14）**：
+- ✨ **Serenity 自动集成**：`generate_serenity.py` 基于行业匹配+财务数据自动生成产业链分析
+- ✨ **骨架生成自动填充第十二章**：运行 `generate_report.py` 时自动检测并集成 Serenity 数据
+- 📊 新增 TCL科技(000100) 完整案例（640行报告，含产业链分析）
+- 🔗 新增 `bridge_a_stock_data.py` 桥接 a-stock-data 43端点
+
+**v1.0（2026-07-13）**：
+- 🔒 Python 数据层锁定（100% API，绝不编造）
+- 📐 行业调整评分（重/混合/轻资产三类阈值）
+- 📰 定性数据获取（新闻+研报+公告）
 
 ---
 
@@ -114,7 +130,21 @@ pip install requests
 帮我分析一下贵州茅台
 ```
 
-**30秒内**，你会得到一份完整的11维度分析报告。
+**30秒内**，你会得到一份完整的11维度分析报告，含自动产业链分析。
+
+**完整流程（自动）**：
+
+```bash
+# Step 1: 获取数据（量化+定性+产业链 一站式）
+python fetch_stock_data.py 000100 TCL科技
+python fetch_qualitative.py 000100 TCL科技
+python generate_serenity.py 000100              # ← 自动生成产业链数据
+
+# Step 2: 生成骨架（自动集成 Serenity 到第十二章）
+python generate_report.py 000100                # ← 0个占位符残留
+
+# Step 3-4: AI 填充分析槽位 → 保存最终报告
+```
 
 ---
 
@@ -137,8 +167,8 @@ pip install requests
 | **数据可信度** | 大模型自行计算，可能幻觉 | Python锁定数据层，100%来自API |
 | **分析框架** | 多为技术面（MA/MACD/RSI） | 11维度基本面（HALO+护城河+滞胀+ESG…） |
 | **行业公平** | 一刀切评分 | 重/混合/轻资产三类阈值 |
-| **产业链视角** | 无 | Serenity供应链瓶颈集成 |
-| **数据韧性** | 单源，挂了就没 | 桥接a-stock-data 43端点+备用源降级 |
+| **产业链视角** | 无 | Serenity供应链瓶颈自动集成 |
+| **数据韧性** | 单源，挂了就没 | 多源API + a-stock-data 43端点桥接 |
 | **可验证性** | 黑箱输出 | 每个数字可追溯到JSON→API |
 | **目标用户** | 短线交易者 | 基本面投资者 |
 
@@ -151,7 +181,7 @@ HALO 不是孤立的——它可以和 A股 Skill 生态互补：
 | Skill | 定位 | 与HALO的关系 |
 |:------|:-----|:-------------|
 | [a-stock-data](https://github.com/simonlin1212/a-stock-data) | 43端点A股数据底座 | **数据层互补**：桥接后可获得龙虎榜/北向/融资融券 |
-| Serenity | 产业链瓶颈扫描 | **分析层互补**：输出集成到HALO第十二章 |
+| Serenity | 产业链瓶颈扫描 | **分析层互补**：深度版覆盖自动生成数据 |
 | 东方财富妙想(mx-*) | 官方数据+选股+模拟 | **工具层互补**：自然语言选股+模拟交易 |
 
 ---
@@ -201,13 +231,17 @@ halo-skill/
 ├── README.md                   # 本文件
 ├── fetch_stock_data.py         # 量化数据获取（行情+财报+资金流）
 ├── fetch_qualitative.py        # 定性数据获取（新闻+研报+公告）
-├── generate_report.py          # 骨架生成（🔒数据层锁定）
-├── integrate_serenity.py       # Serenity产业链数据集成
+├── generate_serenity.py        # ✨ Serenity 产业链数据自动生成
+├── generate_report.py          # 骨架生成（🔒数据层锁定 + Serenity自动集成）
+├── integrate_serenity.py       # Serenity 手动集成（深度版覆盖）
+├── bridge_a_stock_data.py      # a-stock-data 43端点桥接配置
 ├── test_data.py                # 数据完整性测试
+├── install.sh                  # 一键安装脚本
+├── test-prompts.json           # 测试用例集
 ├── data/                       # JSON数据输出目录
 │   ├── {code}.json             # 量化数据
 │   ├── {code}_qualitative.json # 定性数据
-│   └── {code}_serenity.json    # 产业链数据（可选）
+│   └── {code}_serenity.json    # 产业链数据（自动生成）
 └── reports/                    # 报告输出目录
     ├── {code}_skeleton.md      # 骨架（数据锁定，AI待填）
     └── {code}_halo_v5.md       # 最终报告
@@ -226,9 +260,10 @@ halo-skill/
 **合格表现**：
 1. 生成 `data/600519.json`（>100KB）
 2. 生成 `data/600519_qualitative.json`（>15KB）
-3. 生成 `reports/600519_skeleton.md`（所有数字已填充，AI槽位留空）
-4. AI填充分析槽位，生成 `reports/600519_halo_v5.md`
-5. 报告中所有财务数字与JSON源数据一致
+3. 生成 `data/600519_serenity.json`（产业链数据）
+4. 生成 `reports/600519_skeleton.md`（所有数字已填充，AI槽位留空，Serenity已集成）
+5. AI填充分析槽位，生成 `reports/600519_halo_v5.md`
+6. 报告中所有财务数字与JSON源数据一致
 
 ---
 
