@@ -1,10 +1,23 @@
 #!/usr/bin/env python3
-"""halo_harness 基础接口与行为测试"""
+"""halo_harness 基础接口与行为测试（仅标准库 assert，无 pytest）"""
 
-import sys, os, json
+import sys, os, json, tempfile
+from contextlib import contextmanager
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import halo_harness
+
+
+@contextmanager
+def _patch_project_root(tmp_dir):
+    """临时将 halo_harness._project_root 指向 tmp_dir"""
+    original = halo_harness._project_root
+    halo_harness._project_root = lambda: tmp_dir
+    try:
+        yield tmp_dir
+    finally:
+        halo_harness._project_root = original
 
 
 def test_validate_data_ok():
@@ -87,70 +100,78 @@ def test_validate_skeleton_checks_markdown():
     assert checks["无残留数据占位符"]["level"] == "error"
 
 
-def test_validate_skeleton_detects_leftover_placeholders(tmp_path, monkeypatch):
+def test_validate_skeleton_detects_leftover_placeholders():
     # 创建临时骨架，包含残留数据占位符
     code = "FAKE9999"
-    reports_dir = tmp_path / "reports"
-    reports_dir.mkdir()
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        reports_dir = os.path.join(tmp_dir, "reports")
+        data_dir = os.path.join(tmp_dir, "data")
+        os.makedirs(reports_dir)
+        os.makedirs(data_dir)
 
-    skeleton_path = reports_dir / f"{code}_skeleton.md"
-    skeleton_path.write_text("# 报告\n价格: {{PRICE}} 元\nPE: {{PE_TTM}}\n{{AI_SUMMARY}}\n", encoding="utf-8")
+        skeleton_path = os.path.join(reports_dir, f"{code}_skeleton.md")
+        with open(skeleton_path, "w", encoding="utf-8") as f:
+            f.write("# 报告\n价格: {{PRICE}} 元\nPE: {{PE_TTM}}\n{{AI_SUMMARY}}\n")
 
-    # 构造一份可解析的最小 JSON，使关键数字校验能执行
-    data_path = data_dir / f"{code}.json"
-    data_path.write_text(json.dumps({
-        "meta": {"stock_code": code, "stock_name": "测试", "fetch_time": "2026-07-14"},
-        "market": {"price": 99.99, "pe_ttm": 25.5, "pb": 3.0, "mcap_yi": 100},
-        "halo": {"asset_type": "mixed", "total_score": 3.5, "dimensions": {}, "raw": {}},
-        "growth": {"total_score": 5.5},
-    }), encoding="utf-8")
+        # 构造一份可解析的最小 JSON，使关键数字校验能执行
+        data_path = os.path.join(data_dir, f"{code}.json")
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "meta": {"stock_code": code, "stock_name": "测试", "fetch_time": "2026-07-14"},
+                "market": {"price": 99.99, "pe_ttm": 25.5, "pb": 3.0, "mcap_yi": 100},
+                "halo": {"asset_type": "mixed", "total_score": 3.5, "dimensions": {}, "raw": {}},
+                "growth": {"total_score": 5.5},
+            }, f, ensure_ascii=False)
 
-    monkeypatch.setattr(halo_harness, "_project_root", lambda: str(tmp_path))
-    result = halo_harness.validate_skeleton(code)
-    checks = {c["name"]: c for c in result["checks"]}
-    assert checks["骨架文件存在"]["passed"] is True
-    assert checks["无残留数据占位符"]["passed"] is False
-    assert checks["无残留数据占位符"]["level"] == "error"
-    assert "{{PRICE}}" in checks["无残留数据占位符"]["detail"]
+        with _patch_project_root(tmp_dir):
+            result = halo_harness.validate_skeleton(code)
+        checks = {c["name"]: c for c in result["checks"]}
+        assert checks["骨架文件存在"]["passed"] is True
+        assert checks["无残留数据占位符"]["passed"] is False
+        assert checks["无残留数据占位符"]["level"] == "error"
+        assert "{{PRICE}}" in checks["无残留数据占位符"]["detail"]
 
 
-def test_validate_skeleton_corrupt_json_logs_error(tmp_path, monkeypatch):
+def test_validate_skeleton_corrupt_json_logs_error():
     code = "FAKE9998"
-    reports_dir = tmp_path / "reports"
-    reports_dir.mkdir()
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        reports_dir = os.path.join(tmp_dir, "reports")
+        data_dir = os.path.join(tmp_dir, "data")
+        os.makedirs(reports_dir)
+        os.makedirs(data_dir)
 
-    skeleton_path = reports_dir / f"{code}_skeleton.md"
-    skeleton_path.write_text("# 报告\n价格: 99.99 元\n", encoding="utf-8")
+        skeleton_path = os.path.join(reports_dir, f"{code}_skeleton.md")
+        with open(skeleton_path, "w", encoding="utf-8") as f:
+            f.write("# 报告\n价格: 99.99 元\n")
 
-    data_path = data_dir / f"{code}.json"
-    data_path.write_text("{ 这不是合法 JSON", encoding="utf-8")
+        data_path = os.path.join(data_dir, f"{code}.json")
+        with open(data_path, "w", encoding="utf-8") as f:
+            f.write("{ 这不是合法 JSON")
 
-    monkeypatch.setattr(halo_harness, "_project_root", lambda: str(tmp_path))
-    result = halo_harness.validate_skeleton(code)
-    checks = {c["name"]: c for c in result["checks"]}
-    assert checks["JSON 文件可解析"]["passed"] is False
-    assert checks["JSON 文件可解析"]["level"] == "error"
+        with _patch_project_root(tmp_dir):
+            result = halo_harness.validate_skeleton(code)
+        checks = {c["name"]: c for c in result["checks"]}
+        assert checks["JSON 文件可解析"]["passed"] is False
+        assert checks["JSON 文件可解析"]["level"] == "error"
 
 
-def test_validate_skeleton_missing_data_file_warns(tmp_path, monkeypatch):
+def test_validate_skeleton_missing_data_file_warns():
     code = "FAKE9997"
-    reports_dir = tmp_path / "reports"
-    reports_dir.mkdir()
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        reports_dir = os.path.join(tmp_dir, "reports")
+        data_dir = os.path.join(tmp_dir, "data")
+        os.makedirs(reports_dir)
+        os.makedirs(data_dir)
 
-    skeleton_path = reports_dir / f"{code}_skeleton.md"
-    skeleton_path.write_text("# 报告\n", encoding="utf-8")
+        skeleton_path = os.path.join(reports_dir, f"{code}_skeleton.md")
+        with open(skeleton_path, "w", encoding="utf-8") as f:
+            f.write("# 报告\n")
 
-    monkeypatch.setattr(halo_harness, "_project_root", lambda: str(tmp_path))
-    result = halo_harness.validate_skeleton(code)
-    checks = {c["name"]: c for c in result["checks"]}
-    assert checks["数据文件存在"]["passed"] is False
-    assert checks["数据文件存在"]["level"] == "warning"
+        with _patch_project_root(tmp_dir):
+            result = halo_harness.validate_skeleton(code)
+        checks = {c["name"]: c for c in result["checks"]}
+        assert checks["数据文件存在"]["passed"] is False
+        assert checks["数据文件存在"]["level"] == "warning"
 
 
 if __name__ == "__main__":
@@ -165,4 +186,7 @@ if __name__ == "__main__":
     test_score_halo_dimensions_match_generate_report()
     test_score_growth_matches_generate_report()
     test_validate_skeleton_checks_markdown()
+    test_validate_skeleton_detects_leftover_placeholders()
+    test_validate_skeleton_corrupt_json_logs_error()
+    test_validate_skeleton_missing_data_file_warns()
     print("✅ 基础接口测试通过")
