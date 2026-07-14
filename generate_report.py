@@ -11,6 +11,7 @@ import json, os, sys
 from datetime import datetime
 
 # Harness 骨架校验
+import halo_harness
 from halo_harness import validate_skeleton
 
 
@@ -877,9 +878,18 @@ if __name__ == "__main__":
 
     # ── Harness 骨架层校验 ──
     print("  🔍 运行骨架层 harness 校验...")
-    harness_result = validate_skeleton(stock_code)
+    try:
+        harness_result = validate_skeleton(stock_code)
+    except Exception as e:
+        print(f"  ❌ 骨架层 harness 运行异常: {e}")
+        h = halo_harness.Harness(stock_code, "skeleton")
+        h.check("骨架层 harness 运行异常", False,
+                detail=f"{type(e).__name__}: {e}", level="error")
+        halo_harness._save_report(h)
+        sys.exit(1)
+
     if not harness_result["ok"]:
-        print(f"  ⚠️ 骨架层 harness 未通过，请查看 reports/{stock_code}_harness.json")
+        print(f"  ❌ 骨架层 harness 未通过，请查看 reports/{stock_code}_harness.json")
         sys.exit(1)
     print("  ✅ 骨架层 harness 通过")
 

@@ -19,6 +19,7 @@ import requests
 from datetime import datetime
 
 # Harness 数据校验
+import halo_harness
 from halo_harness import validate_data
 
 # ══════════════════════════════════════════
@@ -734,13 +735,22 @@ def fetch_all(code):
 
     # ── Harness 数据层校验 ──
     print("\n  🔍 运行数据层 harness 校验...")
-    harness_result = validate_data(code)
+    try:
+        harness_result = validate_data(code)
+    except Exception as e:
+        print(f"  ❌ 数据层 harness 运行异常: {e}")
+        h = halo_harness.Harness(code, "data")
+        h.check("数据层 harness 运行异常", False,
+                detail=f"{type(e).__name__}: {e}", level="error")
+        halo_harness._save_report(h)
+        return {"ok": False, "result": result, "harness_exception": str(e)}
+
     if not harness_result["ok"]:
-        print(f"  ⚠️ 数据层 harness 未通过，请查看 data/{code}_harness.json")
-        sys.exit(1)
+        print(f"  ❌ 数据层 harness 未通过，请查看 data/{code}_harness.json")
+        return {"ok": False, "result": result, "harness_result": harness_result}
     print("  ✅ 数据层 harness 通过")
 
-    return result
+    return {"ok": True, "result": result, "harness_result": harness_result}
 
 
 # ══════════════════════════════════════════
@@ -757,5 +767,7 @@ if __name__ == "__main__":
         print("错误: 股票代码必须是6位数字")
         sys.exit(1)
 
-    fetch_all(code)
+    status = fetch_all(code)
+    if not status["ok"]:
+        sys.exit(1)
 

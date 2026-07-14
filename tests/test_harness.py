@@ -265,6 +265,17 @@ def test_validate_skeleton_missing_data_file_warns():
         assert checks["数据文件存在"]["level"] == "warning"
 
 
+def test_find_number_in_text_false_positive_rounded_integer():
+    """回归测试：查找 3.60 不应误匹配到 '2024' 中的 '4'"""
+    assert halo_harness._find_number_in_text("2024年", 3.60) is False
+
+
+def test_find_number_in_text_matches_expected_formats():
+    assert halo_harness._find_number_in_text("价格 3.60 元", 3.60) is True
+    assert halo_harness._find_number_in_text("总分 3.6", 3.60) is True
+    assert halo_harness._find_number_in_text("整数 4", 4.0) is True
+
+
 if __name__ == "__main__":
     test_validate_data_ok()
     test_validate_data_checks_json()
@@ -283,4 +294,6 @@ if __name__ == "__main__":
     test_validate_skeleton_detects_leftover_placeholders()
     test_validate_skeleton_corrupt_json_logs_error()
     test_validate_skeleton_missing_data_file_warns()
+    test_find_number_in_text_false_positive_rounded_integer()
+    test_find_number_in_text_matches_expected_formats()
     print("✅ 基础接口测试通过")

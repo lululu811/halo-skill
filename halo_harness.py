@@ -299,7 +299,7 @@ def validate_data(code):
         if not all_positive:
             h.check("行情数值类型合法",
                     all(v is not None for v in (price, pe, pb, mcap)),
-                    detail="存在非数字行情字段", level="warning")
+                    detail="行情字段均可解析为数字，但 price/PE/PB/mcap 中存在非正数", level="warning")
 
     # 4. 财报三表期数
     financial = d.get("financial", {})
@@ -452,6 +452,8 @@ def validate_skeleton(code):
             # 当 JSON 未存储 total_score 时，用复算值与骨架比对
             recalc_halo_total = _recalc_halo_score(halo) if has_dims and has_burden_raw and asset_type else None
             recalc_growth_total = _recalc_growth_score(growth, ratios) if has_growth and has_ratios else None
+            json_halo_total = _safe_float(halo.get("total_score"))
+            json_growth_total = _safe_float(growth.get("total_score"))
 
             if price is not None:
                 h.check("骨架中价格与 JSON 一致",
@@ -466,17 +468,25 @@ def validate_skeleton(code):
                 h.check("骨架中 HALO 总分与 JSON 一致",
                         _find_number_in_text(skeleton, recalc_halo_total),
                         detail=f"复算 halo_total={recalc_halo_total:.2f}", level="error")
+            elif json_halo_total is not None:
+                h.check("骨架中 HALO 总分与 JSON 一致",
+                        _find_number_in_text(skeleton, json_halo_total),
+                        detail=f"JSON stored halo_total={json_halo_total:.2f}", level="error")
             else:
                 h.check("骨架中 HALO 总分可校验", False,
-                        detail="HALO 维度数据不足，无法复算总分", level="warning")
+                        detail="HALO 维度数据不足且 JSON 未存储 total_score", level="warning")
 
             if recalc_growth_total is not None:
                 h.check("骨架中成长分与 JSON 一致",
                         _find_number_in_text(skeleton, recalc_growth_total),
                         detail=f"复算 growth_total={recalc_growth_total:.2f}", level="error")
+            elif json_growth_total is not None:
+                h.check("骨架中成长分与 JSON 一致",
+                        _find_number_in_text(skeleton, json_growth_total),
+                        detail=f"JSON stored growth_total={json_growth_total:.2f}", level="error")
             else:
                 h.check("骨架中成长分可校验", False,
-                        detail="成长性/比率数据不足，无法复算总分", level="warning")
+                        detail="成长性/比率数据不足且 JSON 未存储 total_score", level="warning")
     else:
         h.check("数据文件存在", False,
                 detail=f"{data_path} 不存在，跳过数字一致性校验", level="warning")
@@ -507,9 +517,9 @@ def _find_number_in_text(text, number):
     if number is None:
         return False
     num = float(number)
-    # 查找整数或保留 1-2 位小数的表示
+    # 精确匹配：整数、1位、2位小数的表示，先验证格式化值与目标数值一致
     for fmt in [f"{num:.0f}", f"{num:.1f}", f"{num:.2f}"]:
-        if fmt in text:
+        if abs(float(fmt) - num) <= 0.01 and fmt in text:
             return True
     # 容错：查找接近值
     for m in re.finditer(r"[-+]?\d+\.?\d*", text):
@@ -522,16 +532,21 @@ def _find_number_in_text(text, number):
 
 
 def run_harness(code):
-    """依次运行数据层和骨架层校验"""
+    """依次运行数据层和骨架层校验，并保存组合报告"""
     data_result = validate_data(code)
     skeleton_result = validate_skeleton(code)
-    return {
+    combined = {
         "code": code,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "ok": data_result["ok"] and skeleton_result["ok"],
         "data_layer": data_result,
         "skeleton_layer": skeleton_result,
     }
+    path = os.path.join(_project_root(), "data", f"{code}_harness.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(combined, f, ensure_ascii=False, indent=2)
+    return combined
 
 
 if __name__ == "__main__":
