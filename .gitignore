@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Data files (too large for GitHub, contain real stock data)
+data/*.json
+
+# Reports (generated output)
+reports/*.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OMC internal
+.omc/
+
+# Baseline (鲁班打磨用，不需要发布)
+baseline/
+
+# Legacy templates
+halo_v4.3.md
+halo_v5.0.md
+fill_*.py

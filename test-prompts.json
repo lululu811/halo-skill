@@ -1,0 +1,61 @@
+[
+  {
+    "id": "test-001",
+    "name": "轻资产型股票（白酒）",
+    "prompt": "/halo 600519",
+    "description": "贵州茅台 — 典型轻资产型，品牌驱动",
+    "expected": {
+      "asset_type": "light",
+      "halo_range": "3.0-4.0",
+      "report_exists": "reports/600519_halo_v5.md",
+      "json_exists": "data/600519.json",
+      "json_min_size_kb": 50
+    }
+  },
+  {
+    "id": "test-002",
+    "name": "混合型股票（光电制造）",
+    "prompt": "/halo 600487",
+    "description": "亨通光电 — 混合型，物理+无形资产并重",
+    "expected": {
+      "asset_type": "mixed",
+      "halo_range": "2.5-3.5",
+      "report_exists": "reports/600487_halo_v5.md",
+      "json_exists": "data/600487.json",
+      "json_min_size_kb": 50
+    }
+  },
+  {
+    "id": "test-003",
+    "name": "重资产型股票（银行）",
+    "prompt": "/halo 601398",
+    "description": "工商银行 — 典型重资产型",
+    "expected": {
+      "asset_type": "heavy",
+      "halo_range": "3.5-5.0",
+      "report_exists": "reports/601398_halo_v5.md",
+      "json_exists": "data/601398.json",
+      "json_min_size_kb": 50
+    }
+  },
+  {
+    "id": "test-004",
+    "name": "自然语言触发",
+    "prompt": "帮我分析一下贵州茅台的基本面",
+    "description": "测试自然语言触发是否正常识别",
+    "expected": {
+      "triggers_halo": true
+    }
+  },
+  {
+    "id": "test-005",
+    "name": "Serenity集成",
+    "prompt": "/halo 688019",
+    "description": "安集科技 — 测试有Serenity数据时的集成",
+    "precondition": "data/688019_serenity.json exists",
+    "expected": {
+      "report_has_chapter_12": true,
+      "serenity_integrated": true
+    }
+  }
+]
