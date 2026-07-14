@@ -87,12 +87,240 @@ def _print_summary(harness):
     print(f"  结果: {status} ({len(harness.errors)} errors, {len(harness.warnings)} warnings)")
 
 
+# ── 评分复算工具 ──
+
+def _score_halo_dimensions(halo):
+    """根据 dimension 原始值复算六维得分（与 generate_report.py 阈值一致）"""
+    dims = halo.get("dimensions", {})
+    at = halo.get("asset_type", "mixed")
+
+    # 有形资产密集度
+    ti = dims.get("tangible_intensity", {}).get("value", 0)
+    if at == "heavy":
+        thresholds = [(80, 5), (60, 4), (40, 3), (20, 2), (0, 1)]
+    elif at == "mixed":
+        thresholds = [(70, 5), (50, 4), (30, 3), (15, 2), (0, 1)]
+    else:
+        thresholds = [(60, 5), (40, 4), (20, 3), (10, 2), (0, 1)]
+    s_ti = next((s for t, s in thresholds if ti >= t), 1)
+
+    # 固定资产密集度
+    fi = dims.get("fixed_intensity", {}).get("value", 0)
+    if at == "heavy":
+        thresholds = [(100, 5), (80, 4), (60, 3), (0, 2)]
+    elif at == "mixed":
+        thresholds = [(60, 5), (40, 4), (20, 3), (0, 2)]
+    else:
+        thresholds = [(30, 5), (15, 4), (5, 3), (0, 2)]
+    s_fi = next((s for t, s in thresholds if fi >= t), 1)
+
+    # 固定资产份额
+    fs = dims.get("fixed_share", {}).get("value", 0)
+    thresholds = [(25, 5), (15, 4), (8, 3), (4, 2), (0, 1)]
+    s_fs = next((s for t, s in thresholds if fs >= t), 1)
+
+    # 资本-劳动力比率
+    cl = dims.get("capital_labor", {}).get("value", 0)
+    thresholds = [(200, 5), (100, 4), (50, 3), (20, 2), (0, 1)]
+    s_cl = next((s for t, s in thresholds if cl >= t), 1)
+
+    # Capex密集度
+    ci = dims.get("capex_intensity", {}).get("value", 0)
+    if at == "heavy":
+        thresholds = [(15, 5), (10, 4), (5, 3), (0, 2)]
+    elif at == "mixed":
+        thresholds = [(10, 5), (5, 4), (2, 3), (0, 2)]
+    else:
+        thresholds = [(5, 5), (2, 4), (0.5, 3), (0, 2)]
+    s_ci = next((s for t, s in thresholds if ci >= t), 1)
+
+    # Capex负担
+    raw = halo.get("raw", {})
+    capex = raw.get("capex_yi", 0)
+    ocf = raw.get("ocf_yi", 0)
+    if ocf and float(ocf) > 0 and capex is not None:
+        burden = float(capex) / float(ocf) * 100
+    else:
+        burden = 999
+    thresholds = [(5, 5), (15, 4), (30, 3), (50, 2), (0, 1)]
+    s_cb = 1 if burden > 100 else next((s for t, s in thresholds if burden <= t), 1)
+
+    return {
+        "tangible_intensity": s_ti,
+        "fixed_intensity": s_fi,
+        "fixed_share": s_fs,
+        "capital_labor": s_cl,
+        "capex_intensity": s_ci,
+        "capex_burden": s_cb,
+    }
+
+
+def _recalc_halo_score(halo):
+    """独立复算 HALO 总分"""
+    dim_scores = _score_halo_dimensions(halo)
+    weights = {
+        "tangible_intensity": 0.20,
+        "fixed_intensity": 0.15,
+        "fixed_share": 0.15,
+        "capital_labor": 0.15,
+        "capex_intensity": 0.15,
+        "capex_burden": 0.20,
+    }
+    return sum(dim_scores[name] * weight for name, weight in weights.items())
+
+
+def _recalc_growth_score(growth, ratios):
+    """独立复算成长性总分"""
+    # 4.1 营收增长
+    rev_yoy = growth.get("revenue_yoy", 0)
+    if rev_yoy > 30:
+        s_rev = 9
+    elif rev_yoy > 15:
+        s_rev = 7
+    elif rev_yoy > 5:
+        s_rev = 5
+    elif rev_yoy > 0:
+        s_rev = 3
+    else:
+        s_rev = 2
+
+    # 4.2 利润增长
+    np_yoy = growth.get("net_profit_yoy", 0)
+    if np_yoy > 30:
+        s_np = 9
+    elif np_yoy > 15:
+        s_np = 7
+    elif np_yoy > 5:
+        s_np = 5
+    elif np_yoy > 0:
+        s_np = 3
+    else:
+        s_np = 2
+
+    # 4.3 增长质量
+    cf_ratio = ratios.get("cf_to_profit", 0)
+    debt = ratios.get("debt_ratio", 0)
+    quality = 5
+    if cf_ratio > 0.8:
+        quality += 1
+    if debt < 40:
+        quality += 1
+    if debt > 70:
+        quality -= 2
+    if cf_ratio < 0:
+        quality -= 2
+    s_quality = max(1, min(10, quality))
+
+    # 4.4 增长持续性
+    annual_rev_yoy = growth.get("annual_revenue_yoy", 0)
+    sustain = 5
+    if annual_rev_yoy > 10:
+        sustain += 1
+    if annual_rev_yoy < 0:
+        sustain -= 1
+    s_sustain = max(1, min(10, sustain))
+
+    return (s_rev + s_np + s_quality + s_sustain) / 4
+
+
 # ── 入口函数 ──
 def validate_data(code):
-    """校验 data/{code}.json"""
+    """校验 data/{code}.json 的完整性、合理性与一致性"""
     h = Harness(code, "data")
-    # TODO: 具体校验规则在 Task 2 实现
-    h.check("数据文件存在", os.path.exists(_data_path(code)))
+    data_path = _data_path(code)
+
+    # 1. 文件存在
+    exists = os.path.exists(data_path)
+    h.check("数据文件存在", exists, detail=f"路径: {data_path}")
+    if not exists:
+        _save_report(h)
+        _print_summary(h)
+        return h.report()
+
+    with open(data_path, "r", encoding="utf-8") as f:
+        d = json.load(f)
+
+    # 2. meta 字段完整
+    meta = d.get("meta", {})
+    h.check("meta 字段完整",
+            meta.get("stock_code") == code and bool(meta.get("stock_name")) and bool(meta.get("fetch_time")),
+            detail=f"stock_code={meta.get('stock_code')}, stock_name={meta.get('stock_name')}")
+
+    # 3. 行情数据存在且合理
+    market = d.get("market", {})
+    required_market = ["price", "pe_ttm", "pb", "mcap_yi"]
+    has_market = all(k in market for k in required_market)
+    h.check("行情数据字段完整", has_market, detail=f"缺失: {[k for k in required_market if k not in market]}")
+    if has_market:
+        h.check("行情数值合理",
+                market["price"] > 0 and market["pe_ttm"] > 0 and market["pb"] > 0 and market["mcap_yi"] > 0,
+                detail=f"price={market['price']}, pe={market['pe_ttm']}, pb={market['pb']}, mcap={market['mcap_yi']}")
+
+    # 4. 财报三表期数
+    financial = d.get("financial", {})
+    income = financial.get("income", [])
+    balance = financial.get("balance", [])
+    cashflow = financial.get("cashflow", [])
+    h.check("财报三表期数 ≥2",
+            len(income) >= 2 and len(balance) >= 2 and len(cashflow) >= 2,
+            detail=f"利润表{len(income)}期, 负债表{len(balance)}期, 现金流表{len(cashflow)}期")
+
+    # 5. 资产类型合法
+    halo = d.get("halo", {})
+    asset_type = halo.get("asset_type", "")
+    h.check("资产类型合法", asset_type in ("heavy", "mixed", "light"), detail=f"asset_type={asset_type}")
+
+    # 6. HALO 六维原始值存在
+    dims = halo.get("dimensions", {})
+    required_dims = ["tangible_intensity", "fixed_intensity", "fixed_share", "capital_labor", "capex_intensity", "capex_burden"]
+    has_dims = all(k in dims for k in required_dims)
+    h.check("HALO 六维原始值存在", has_dims,
+            detail=f"缺失: {[k for k in required_dims if k not in dims]}")
+
+    # 7. 关键财务比率
+    ratios = d.get("ratios", {})
+    required_ratios = ["roe", "roa", "gross_margin", "net_margin", "debt_ratio"]
+    has_ratios = all(k in ratios for k in required_ratios)
+    h.check("关键财务比率存在", has_ratios,
+            detail=f"缺失: {[k for k in required_ratios if k not in ratios]}", level="warning")
+    if has_ratios:
+        debt = ratios.get("debt_ratio", 0)
+        h.check("负债率合理", 0 <= debt <= 100, detail=f"debt_ratio={debt}", level="warning")
+
+    # 8. 成长性字段
+    growth = d.get("growth", {})
+    has_growth = "revenue_yoy" in growth and "net_profit_yoy" in growth
+    h.check("成长性字段存在", has_growth,
+            detail=f"缺失: revenue_yoy={growth.get('revenue_yoy')}, net_profit_yoy={growth.get('net_profit_yoy')}",
+            level="warning")
+
+    # 9. 评分计算复核（允许 ±0.1 浮点误差）
+    json_halo_total = halo.get("total_score")
+    json_growth_total = growth.get("total_score")
+    recalc_halo = _recalc_halo_score(halo) if has_dims and asset_type else None
+    recalc_growth = _recalc_growth_score(growth, ratios) if has_growth and has_ratios else None
+
+    if json_halo_total is not None and recalc_halo is not None:
+        h.check("HALO 评分复算一致",
+                abs(float(json_halo_total) - recalc_halo) <= 0.1,
+                detail=f"JSON={json_halo_total}, 复算={recalc_halo:.2f}")
+    elif recalc_halo is not None:
+        h.check("HALO 总分已复算", True,
+                detail=f"JSON 未存储 total_score, 复算={recalc_halo:.2f}")
+
+    if json_growth_total is not None and recalc_growth is not None:
+        h.check("成长性评分复算一致",
+                abs(float(json_growth_total) - recalc_growth) <= 0.1,
+                detail=f"JSON={json_growth_total}, 复算={recalc_growth:.2f}")
+    elif recalc_growth is not None:
+        h.check("成长性总分已复算", True,
+                detail=f"JSON 未存储 total_score, 复算={recalc_growth:.2f}")
+
+    # 10. 资金流数据（warning）
+    fund_flow = d.get("fund_flow", [])
+    h.check("资金流数据存在", len(fund_flow) > 0,
+            detail=f"fund_flow={len(fund_flow)}条", level="warning")
+
     _save_report(h)
     _print_summary(h)
     return h.report()
