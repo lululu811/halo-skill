@@ -42,7 +42,7 @@ class Harness:
     def check(self, name, condition, detail="", level="error"):
         """记录一项检查结果"""
         passed = bool(condition)
-        record = {"name": name, "passed": passed, "detail": detail}
+        record = {"name": name, "passed": passed, "detail": detail, "level": level}
         self.checks.append(record)
         if not passed:
             if level == "error":
@@ -77,7 +77,12 @@ def _save_report(harness):
 def _print_summary(harness):
     print(f"\n[HALO Harness] {harness.code} — {harness.layer}层")
     for c in harness.checks:
-        icon = "✅" if c["passed"] else "❌"
+        if c["passed"]:
+            icon = "✅"
+        elif c.get("level") == "warning":
+            icon = "⚠️"
+        else:
+            icon = "❌"
         print(f"  {icon} {c['name']}")
         if c["detail"]:
             print(f"     {c['detail']}")
@@ -89,52 +94,65 @@ def _print_summary(harness):
 
 # ── 评分复算工具 ──
 
+def _dim_value(dims, key):
+    """读取维度原始值；键存在但 value 缺失/为 None 时返回 None"""
+    item = dims.get(key, {})
+    if not isinstance(item, dict):
+        return None
+    val = item.get("value")
+    return None if val is None else float(val)
+
+
 def _score_halo_dimensions(halo):
     """根据 dimension 原始值复算六维得分（与 generate_report.py 阈值一致）"""
     dims = halo.get("dimensions", {})
     at = halo.get("asset_type", "mixed")
 
     # 有形资产密集度
-    ti = dims.get("tangible_intensity", {}).get("value", 0)
+    ti = _dim_value(dims, "tangible_intensity")
     if at == "heavy":
         thresholds = [(80, 5), (60, 4), (40, 3), (20, 2), (0, 1)]
     elif at == "mixed":
         thresholds = [(70, 5), (50, 4), (30, 3), (15, 2), (0, 1)]
     else:
         thresholds = [(60, 5), (40, 4), (20, 3), (10, 2), (0, 1)]
-    s_ti = next((s for t, s in thresholds if ti >= t), 1)
+    s_ti = next((s for t, s in thresholds if ti >= t), 1) if ti is not None else None
 
     # 固定资产密集度
-    fi = dims.get("fixed_intensity", {}).get("value", 0)
+    fi = _dim_value(dims, "fixed_intensity")
     if at == "heavy":
         thresholds = [(100, 5), (80, 4), (60, 3), (0, 2)]
     elif at == "mixed":
         thresholds = [(60, 5), (40, 4), (20, 3), (0, 2)]
     else:
         thresholds = [(30, 5), (15, 4), (5, 3), (0, 2)]
-    s_fi = next((s for t, s in thresholds if fi >= t), 1)
+    s_fi = next((s for t, s in thresholds if fi >= t), 1) if fi is not None else None
 
     # 固定资产份额
-    fs = dims.get("fixed_share", {}).get("value", 0)
+    fs = _dim_value(dims, "fixed_share")
     thresholds = [(25, 5), (15, 4), (8, 3), (4, 2), (0, 1)]
-    s_fs = next((s for t, s in thresholds if fs >= t), 1)
+    s_fs = next((s for t, s in thresholds if fs >= t), 1) if fs is not None else None
 
     # 资本-劳动力比率
-    cl = dims.get("capital_labor", {}).get("value", 0)
+    cl = _dim_value(dims, "capital_labor")
     thresholds = [(200, 5), (100, 4), (50, 3), (20, 2), (0, 1)]
-    s_cl = next((s for t, s in thresholds if cl >= t), 1)
+    s_cl = next((s for t, s in thresholds if cl >= t), 1) if cl is not None else None
 
     # Capex密集度
-    ci = dims.get("capex_intensity", {}).get("value", 0)
+    ci = _dim_value(dims, "capex_intensity")
     if at == "heavy":
         thresholds = [(15, 5), (10, 4), (5, 3), (0, 2)]
     elif at == "mixed":
         thresholds = [(10, 5), (5, 4), (2, 3), (0, 2)]
     else:
         thresholds = [(5, 5), (2, 4), (0.5, 3), (0, 2)]
-    s_ci = next((s for t, s in thresholds if ci >= t), 1)
+    s_ci = next((s for t, s in thresholds if ci >= t), 1) if ci is not None else None
 
-    # Capex负担
+    # 任一核心维度原始值缺失均无法复算
+    if None in (s_ti, s_fi, s_fs, s_cl, s_ci):
+        return None
+
+    # Capex负担：与 generate_report.py 一致，使用 raw.capex_yi / ocf_yi
     raw = halo.get("raw", {})
     capex = raw.get("capex_yi", 0)
     ocf = raw.get("ocf_yi", 0)
@@ -158,6 +176,8 @@ def _score_halo_dimensions(halo):
 def _recalc_halo_score(halo):
     """独立复算 HALO 总分"""
     dim_scores = _score_halo_dimensions(halo)
+    if dim_scores is None:
+        return None
     weights = {
         "tangible_intensity": 0.20,
         "fixed_intensity": 0.15,
@@ -166,7 +186,8 @@ def _recalc_halo_score(halo):
         "capex_intensity": 0.15,
         "capex_burden": 0.20,
     }
-    return sum(dim_scores[name] * weight for name, weight in weights.items())
+    total = sum(dim_scores[name] * weight for name, weight in weights.items())
+    return round(total, 2)
 
 
 def _recalc_growth_score(growth, ratios):
@@ -220,7 +241,8 @@ def _recalc_growth_score(growth, ratios):
         sustain -= 1
     s_sustain = max(1, min(10, sustain))
 
-    return (s_rev + s_np + s_quality + s_sustain) / 4
+    total = (s_rev + s_np + s_quality + s_sustain) / 4
+    return round(total, 1)
 
 
 # ── 入口函数 ──
@@ -270,16 +292,23 @@ def validate_data(code):
     asset_type = halo.get("asset_type", "")
     h.check("资产类型合法", asset_type in ("heavy", "mixed", "light"), detail=f"asset_type={asset_type}")
 
-    # 6. HALO 六维原始值存在
+    # 6. HALO 核心维度原始值存在（capex_burden 由 raw 复算，不强制要求 dims 中提供）
     dims = halo.get("dimensions", {})
-    required_dims = ["tangible_intensity", "fixed_intensity", "fixed_share", "capital_labor", "capex_intensity", "capex_burden"]
+    required_dims = ["tangible_intensity", "fixed_intensity", "fixed_share", "capital_labor", "capex_intensity"]
     has_dims = all(k in dims for k in required_dims)
-    h.check("HALO 六维原始值存在", has_dims,
+    h.check("HALO 核心维度原始值存在", has_dims,
             detail=f"缺失: {[k for k in required_dims if k not in dims]}")
+
+    # 6.1 Capex负担复算依赖的原始字段存在
+    raw = halo.get("raw", {})
+    required_raw_burden = ["capex_yi", "ocf_yi"]
+    has_burden_raw = all(k in raw for k in required_raw_burden)
+    h.check("Capex负担原始数据存在", has_burden_raw,
+            detail=f"缺失: {[k for k in required_raw_burden if k not in raw]}")
 
     # 7. 关键财务比率
     ratios = d.get("ratios", {})
-    required_ratios = ["roe", "roa", "gross_margin", "net_margin", "debt_ratio"]
+    required_ratios = ["roe", "roa", "gross_margin", "net_margin", "debt_ratio", "cf_to_profit"]
     has_ratios = all(k in ratios for k in required_ratios)
     h.check("关键财务比率存在", has_ratios,
             detail=f"缺失: {[k for k in required_ratios if k not in ratios]}", level="warning")
@@ -297,8 +326,13 @@ def validate_data(code):
     # 9. 评分计算复核（允许 ±0.1 浮点误差）
     json_halo_total = halo.get("total_score")
     json_growth_total = growth.get("total_score")
-    recalc_halo = _recalc_halo_score(halo) if has_dims and asset_type else None
+    recalc_halo = _recalc_halo_score(halo) if has_dims and has_burden_raw and asset_type else None
     recalc_growth = _recalc_growth_score(growth, ratios) if has_growth and has_ratios else None
+
+    # 若核心维度存在但 value 缺失，则无法复算，作为 warning 提示
+    if recalc_halo is None and has_dims and has_burden_raw and asset_type:
+        h.check("HALO 评分可复算", False,
+                detail="存在维度原始值缺失或非法", level="warning")
 
     if json_halo_total is not None and recalc_halo is not None:
         h.check("HALO 评分复算一致",
