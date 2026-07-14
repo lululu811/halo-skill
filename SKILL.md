@@ -33,11 +33,15 @@ python fetch_stock_data.py <股票代码> <股票名称>
 
 # 获取定性数据（新闻+研报+公告）
 python fetch_qualitative.py <股票代码> <股票名称>
+
+# 自动生成产业链数据（Serenity 启发式版本）
+python generate_serenity.py <股票代码>
 ```
 
 脚本输出：
 - `data/{code}.json` — 量化数据（行情/三表/HALO原始值/财务比率/成长性/资金流）
 - `data/{code}_qualitative.json` — 定性数据（新闻/研报/公告）
+- `data/{code}_serenity.json` — 产业链数据（自动启发式，基于行业匹配+财务数据）
 
 **可选增强：a-stock-data 桥接**
 
@@ -81,13 +85,30 @@ python generate_report.py <股票代码>
 
 检查最终报告中是否有任何数字与 JSON 源数据不一致。
 
-### Step 6: Serenity 产业链集成（可选）
+### Step 6: Serenity 产业链集成
 
-如果已有 Serenity 产业链扫描数据，可集成到报告中：
+**Serenity 数据已在 Step 1 自动生成**（`data/{code}_serenity.json`，启发式版本）。
+
+集成到报告：
 
 ```bash
 # 集成 Serenity 数据到报告
 python integrate_serenity.py <股票代码> [serenity_json_path]
+```
+
+**数据层级**：
+- **自动版**（Step 1 生成）：基于行业匹配+财务数据的启发式分析，覆盖基础产业链定位
+- **深度版**（可选升级）：使用 `/serenity` skill 进行源端验证，获得更精准的瓶颈分析
+
+**升级到深度版**：
+```bash
+# 1. 用 Serenity skill 深度分析
+/serenity A股 <主题> <股票代码>
+
+# 2. 手动覆盖 data/{code}_serenity.json
+
+# 3. 重新集成
+python integrate_serenity.py <股票代码>
 ```
 
 **Serenity 数据格式**：`data/{code}_serenity.json`，包含：
@@ -98,11 +119,6 @@ python integrate_serenity.py <股票代码> [serenity_json_path]
 - 产业链评分（scores）
 
 **集成效果**：在报告中新增第十二章"产业链定位"，展示公司在产业链中的卡点位置、证据链、风险与证伪条件。
-
-**工作流**：
-1. 使用 `/serenity` 或 Serenity skill 进行产业链扫描
-2. 输出 Serenity JSON 数据
-3. 运行 `integrate_serenity.py` 集成到 HALO 报告
 
 **示例**：
 ```bash

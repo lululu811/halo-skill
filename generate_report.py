@@ -778,6 +778,56 @@ def generate_skeleton(json_path, qual_path=None):
     return "\n".join(lines)
 
 
+def integrate_serenity_inline(skeleton, serenity_data):
+    """将 Serenity 数据填充到骨架字符串中（不写文件）"""
+    replacements = {}
+
+    # 12.1 产业链位置
+    replacements["{{SERENITY_CHAIN}}"] = serenity_data.get("chain", "⚠️ 数据缺失")
+    replacements["{{SERENITY_LAYER}}"] = serenity_data.get("layer", "⚠️ 数据缺失")
+    replacements["{{SERENITY_BOTTLENECK}}"] = serenity_data.get("bottleneck", "⚠️ 数据缺失")
+    replacements["{{SERENITY_SCARCITY}}"] = serenity_data.get("scarcity_rating", "⚠️ 数据缺失")
+    replacements["{{SERENITY_EXPANSION}}"] = serenity_data.get("expansion_difficulty", "⚠️ 数据缺失")
+    replacements["{{SERENITY_POSITION_ANALYSIS}}"] = serenity_data.get("position_analysis", "⚠️ 待 AI 填充")
+
+    # 12.2 证据链
+    evidence = serenity_data.get("evidence", [])
+    for i in range(3):
+        if i < len(evidence):
+            replacements[f"{{{{SERENITY_EVIDENCE_{i+1}}}}}"] = evidence[i].get("content", "⚠️ 数据缺失")
+            replacements[f"{{{{SERENITY_STRENGTH_{i+1}}}}}"] = evidence[i].get("strength", "⭐")
+        else:
+            replacements[f"{{{{SERENITY_EVIDENCE_{i+1}}}}}"] = "暂无"
+            replacements[f"{{{{SERENITY_STRENGTH_{i+1}}}}}"] = "-"
+
+    replacements["{{SERENITY_EVIDENCE_ANALYSIS}}"] = serenity_data.get("evidence_analysis", "⚠️ 待 AI 填充")
+
+    # 12.3 风险与证伪
+    risks = serenity_data.get("risks", {})
+    replacements["{{SERENITY_RISK_SUBSTITUTE}}"] = risks.get("substitute", "⚠️ 数据缺失")
+    replacements["{{SERENITY_RISK_EXPANSION}}"] = risks.get("expansion", "⚠️ 数据缺失")
+    replacements["{{SERENITY_RISK_DEMAND}}"] = risks.get("demand", "⚠️ 数据缺失")
+    replacements["{{SERENITY_FALSIFICATION}}"] = risks.get("falsification", "⚠️ 数据缺失")
+    replacements["{{SERENITY_RISK_ANALYSIS}}"] = serenity_data.get("risk_analysis", "⚠️ 待 AI 填充")
+
+    # 12.4 产业链评分
+    scores = serenity_data.get("scores", {})
+    replacements["{{SERENITY_SCARCITY_SCORE}}"] = str(scores.get("scarcity", "⚠️"))
+    replacements["{{SERENITY_SCARCITY_COMMENT}}"] = scores.get("scarcity_comment", "⚠️ 数据缺失")
+    replacements["{{SERENITY_CONTROL_SCORE}}"] = str(scores.get("control", "⚠️"))
+    replacements["{{SERENITY_CONTROL_COMMENT}}"] = scores.get("control_comment", "⚠️ 数据缺失")
+    replacements["{{SERENITY_EVIDENCE_SCORE}}"] = str(scores.get("evidence", "⚠️"))
+    replacements["{{SERENITY_EVIDENCE_COMMENT}}"] = scores.get("evidence_comment", "⚠️ 数据缺失")
+    replacements["{{SERENITY_TOTAL_SCORE}}"] = str(scores.get("total", "⚠️"))
+    replacements["{{SERENITY_TOTAL_COMMENT}}"] = scores.get("total_comment", "⚠️ 数据缺失")
+
+    # 应用替换
+    for k, v in replacements.items():
+        skeleton = skeleton.replace(k, str(v))
+
+    return skeleton
+
+
 # ── CLI ──
 
 if __name__ == "__main__":
@@ -804,20 +854,37 @@ if __name__ == "__main__":
     print(f"{'='*60}\n")
     
     skeleton = generate_skeleton(json_path, qual_path)
-    
+
+    # 自动集成 Serenity 数据（如果存在）
+    serenity_path = os.path.join(data_dir, f"{stock_code}_serenity.json")
+    serenity_integrated = False
+    if os.path.exists(serenity_path):
+        try:
+            from integrate_serenity import integrate_serenity
+            with open(serenity_path, 'r', encoding='utf-8') as f:
+                serenity_data = json.load(f)
+            skeleton = integrate_serenity_inline(skeleton, serenity_data)
+            serenity_integrated = True
+        except Exception as e:
+            print(f"  ⚠️ Serenity 集成失败: {e}")
+
     output_path = os.path.join(reports_dir, f"{stock_code}_skeleton.md")
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(skeleton)
-    
+
     # 统计 AI 槽位数量
     ai_slots = skeleton.count("{{AI_")
-    data_fields = skeleton.count("{{DATA_") if "{{DATA_" in skeleton else 0
-    
+    serenity_slots = skeleton.count("{{SERENITY_")
+
     print(f"  ✅ 骨架保存到: {output_path}")
     print(f"  📊 文件大小: {os.path.getsize(output_path)/1024:.1f} KB")
     print(f"  📝 报告行数: {len(skeleton.splitlines())}")
     print(f"  🔒 数据字段: 已由 Python 填充（100% 来自 JSON）")
     print(f"  ✍️  AI 槽位: {ai_slots} 个（待 AI 填充分析文字）")
+    if serenity_integrated:
+        print(f"  🔗 Serenity: ✅ 已自动集成产业链数据")
+    elif serenity_slots > 0:
+        print(f"  🔗 Serenity: ⚠️ {serenity_slots} 个槽位待填充（运行 generate_serenity.py 后重新生成）")
     print(f"{'='*60}\n")
     print(f"  下一步: AI 读取 {output_path}，填充 {ai_slots} 个 {{AI_*}} 槽位")
     print(f"  最终输出: reports/{stock_code}_halo_v5.md")
