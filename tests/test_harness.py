@@ -76,6 +76,13 @@ def test_score_growth_matches_generate_report():
     assert abs(halo_harness._recalc_growth_score(d["growth"], d["ratios"]) - expected) < 1e-9
 
 
+def test_validate_skeleton_checks_markdown():
+    # 假设 reports/000100_skeleton.md 已存在
+    result = halo_harness.validate_skeleton("000100")
+    check_names = [c["name"] for c in result["checks"]]
+    assert "骨架文件存在" in check_names
+
+
 if __name__ == "__main__":
     test_validate_data_ok()
     test_validate_data_checks_json()
@@ -87,4 +94,5 @@ if __name__ == "__main__":
     test_score_halo_missing_dim_value_returns_none()
     test_score_halo_dimensions_match_generate_report()
     test_score_growth_matches_generate_report()
+    test_validate_skeleton_checks_markdown()
     print("✅ 基础接口测试通过")

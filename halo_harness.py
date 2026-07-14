@@ -361,13 +361,92 @@ def validate_data(code):
 
 
 def validate_skeleton(code):
-    """校验 reports/{code}_skeleton.md"""
+    """校验 reports/{code}_skeleton.md 的数据填充正确性"""
     h = Harness(code, "skeleton")
-    # TODO: 具体校验规则在 Task 3 实现
-    h.check("骨架文件存在", os.path.exists(_skeleton_path(code)))
+    skeleton_path = _skeleton_path(code)
+    data_path = _data_path(code)
+
+    # 1. 文件存在且非空
+    exists = os.path.exists(skeleton_path) and os.path.getsize(skeleton_path) > 0
+    h.check("骨架文件存在", exists, detail=f"路径: {skeleton_path}")
+    if not exists:
+        _save_report(h)
+        _print_summary(h)
+        return h.report()
+
+    with open(skeleton_path, "r", encoding="utf-8") as f:
+        skeleton = f.read()
+
+    # 2. 无残留数据占位符（允许 {{AI_*}} 和 {{SERENITY_*}}）
+    unknown_placeholders = re.findall(r"\{\{[A-Z][A-Z_0-9]+\}\}", skeleton)
+    allowed = {"{{AI_", "{{SERENITY_"}
+    leftover = [p for p in unknown_placeholders if not any(p.startswith(a) for a in allowed)]
+    h.check("无残留数据占位符", len(leftover) == 0,
+            detail=f"残留: {leftover[:5]}")
+
+    # 3. 关键数字与 JSON 一致
+    if os.path.exists(data_path):
+        with open(data_path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        market = d.get("market", {})
+        price = market.get("price")
+        pe = market.get("pe_ttm")
+        halo = d.get("halo", {})
+        halo_total = halo.get("total_score")
+        growth = d.get("growth", {})
+        growth_total = growth.get("total_score")
+
+        h.check("骨架中价格与 JSON 一致",
+                price is None or _find_number_in_text(skeleton, price),
+                detail=f"JSON price={price}")
+        h.check("骨架中 PE 与 JSON 一致",
+                pe is None or _find_number_in_text(skeleton, pe),
+                detail=f"JSON pe_ttm={pe}")
+        h.check("骨架中 HALO 总分与 JSON 一致",
+                halo_total is None or _find_number_in_text(skeleton, halo_total),
+                detail=f"JSON halo_total={halo_total}")
+        h.check("骨架中成长分与 JSON 一致",
+                growth_total is None or _find_number_in_text(skeleton, growth_total),
+                detail=f"JSON growth_total={growth_total}")
+
+    # 4. 免责声明和有效期
+    h.check("包含免责声明", "免责声明" in skeleton, level="warning")
+    h.check("包含30日有效期", "30日有效期" in skeleton or "报告有效期30日" in skeleton, level="warning")
+
+    # 5. 产业链章节（如果 serenity 数据存在）
+    serenity_path = os.path.join(_project_root(), "data", f"{code}_serenity.json")
+    if os.path.exists(serenity_path):
+        chapter12 = skeleton.split("## 🔗 十二、产业链定位")[-1] if "## 🔗 十二、产业链定位" in skeleton else ""
+        h.check("产业链章节不为空", len(chapter12.strip()) > 200,
+                detail=f"章节长度={len(chapter12.strip())}", level="warning")
+
+    # 6. 缺失标记数量
+    missing_count = skeleton.count("⚠️ 缺失")
+    h.check("缺失标记不过多", missing_count <= 10,
+            detail=f"缺失标记={missing_count}", level="warning")
+
     _save_report(h)
     _print_summary(h)
     return h.report()
+
+
+def _find_number_in_text(text, number):
+    """在文本中查找数字的字符串表示（支持 ±0.01 误差）"""
+    if number is None:
+        return False
+    num = float(number)
+    # 查找整数或保留 1-2 位小数的表示
+    for fmt in [f"{num:.0f}", f"{num:.1f}", f"{num:.2f}"]:
+        if fmt in text:
+            return True
+    # 容错：查找接近值
+    for m in re.finditer(r"[-+]?\d+\.?\d*", text):
+        try:
+            if abs(float(m.group()) - num) <= 0.01:
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def run_harness(code):
