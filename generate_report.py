@@ -565,7 +565,26 @@ def generate_skeleton(json_path, qual_path=None):
     w("> 研究表明，ESG评分高的企业长期风险更低、资本成本更低、品牌价值更高。")
     w("> 尤其对机构投资者，ESG是'排除法'的硬指标——环保违规、治理丑闻可能导致被动抛售。")
     w("")
-    w("{{AI_ESG_SECTION}}")
+    # 7.1 治理(G)-分红回报与合规
+    w("### ⚖️ 7.1 治理(G)-分红回报与合规\n")
+    _div_all = d.get("dividend", [])
+    _div_impl = [x for x in _div_all if x.get("progress") == "实施分配" and x.get("pretax_bonus", 0) > 0]
+    w("| 📊 项目 | 📝 内容 |")
+    w("|:--------|:--------|")
+    if _div_impl:
+        _latest_yield = _div_impl[0].get("dividend_ratio", 0) * 100
+        w(f"| 分红连续性 | 近{len(_div_impl)}次实施分红 |")
+        w(f"| 最近股息率 | {_latest_yield:.2f}% |")
+    else:
+        w("| 分红连续性 | ⚠️ 无已实施分红记录 |")
+    w("| 处罚/违规记录 | ⚠️ 数据源暂不可用 |")
+    w("")
+
+    # 7.2 环境(E)与社会(S)
+    w("### 🌍 7.2 环境(E)与社会(S)\n")
+    w("> ⚠️ 数据源暂不可用：东财未提供个股 ESG 评级接口；E/S 维度由 AI 结合行业定性判断。")
+    w("")
+    w("> 💡 {{AI_ESG_ANALYSIS}}")
     w("")
     w("---")
     w("")
@@ -579,7 +598,17 @@ def generate_skeleton(json_path, qual_path=None):
     w(">")
     w("> ⚠️ 国企 vs 民企差异：国企决策稳健但激励不足；民企激励强但'一股独大'风险高。")
     w("")
-    w("{{AI_MGMT_SECTION}}")
+    # 8.1 管理层基本信息（数据来自东财 F10）
+    w("### 👔 8.1 管理层基本信息\n")
+    _mgmt_count = f10.get("management_count", 0)
+    w("| 📌 项目 | 📝 内容 | 🌐 来源 |")
+    w("|:--------|:--------|:-------:|")
+    w(f"| 董事长 | {chairman or '⚠️ 缺失'} | 东财F10 |")
+    w(f"| 总经理 | {gm or '⚠️ 缺失'} | 东财F10 |")
+    w(f"| 员工人数 | {int(emp):,}人 | 东财F10 |")
+    w(f"| 管理人员数 | {int(_mgmt_count) if _mgmt_count else '⚠️ 缺失'} | 东财F10 |")
+    w("")
+    w("> 💡 {{AI_MGMT_ANALYSIS}}")
     w("")
     w("---")
     w("")
