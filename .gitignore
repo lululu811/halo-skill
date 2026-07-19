@@ -10,6 +10,7 @@ data/*.json
 
 # Reports (generated output)
 reports/*.md
+reports/*.json
 
 # OS
 .DS_Store
