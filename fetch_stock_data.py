@@ -322,11 +322,13 @@ def fetch_dividend_history(code):
         for d in (data or []):
             records.append({
                 "report_date": d.get("REPORT_DATE", ""),
-                "bonus_amount": sf(d.get("BONUS_AMOUNT")),
-                "dividend_per_share": sf(d.get("PER_CASH_DIV")),
-                "dividend_ratio": sf(d.get("DIVIDENT_BONUS_RATIO")),
-                "transfer_ratio": sf(d.get("TRANSFER_RATIO")),
-                "record_date": d.get("EX_DIVIDEND_DATE", ""),
+                "pretax_bonus": sf(d.get("PRETAX_BONUS_RMB")),       # 每10股派息(税前,元)
+                "dividend_ratio": sf(d.get("DIVIDENT_RATIO")),        # 股息率(小数)
+                "transfer_ratio": sf(d.get("IT_RATIO")),              # 每10股转股
+                "plan_profile": d.get("IMPL_PLAN_PROFILE", ""),       # 分红方案描述
+                "progress": d.get("ASSIGN_PROGRESS", ""),             # 进度(预披露/实施分配)
+                "record_date": d.get("EQUITY_RECORD_DATE", ""),       # 股权登记日
+                "ex_dividend_date": d.get("EX_DIVIDEND_DATE", ""),    # 除权除息日
             })
         return records
     except Exception:
@@ -681,6 +683,35 @@ def fetch_all(code):
     except Exception as e:
         print(f"    ❌ {e}")
         result["fund_flow"] = []
+
+    # 8. 股东人数（筹码集中度）
+    print("  [8/9] 股东人数（东财）...")
+    try:
+        holder_num = fetch_holder_num(code)
+        result["holder_num"] = holder_num
+        if holder_num:
+            h0 = holder_num[0]
+            print(f"    ✅ 股东人数={int(h0.get('holder_num', 0)):,} 较上期{h0.get('holder_num_change', 0):+.0f}")
+        else:
+            print("    ⚠️ 无股东人数数据")
+    except Exception as e:
+        print(f"    ❌ {e}")
+        result["holder_num"] = []
+
+    # 9. 分红送转历史
+    print("  [9/9] 分红送转（东财）...")
+    try:
+        dividend = fetch_dividend_history(code)
+        result["dividend"] = dividend
+        impl = [d for d in dividend if d.get("progress") == "实施分配" and d.get("pretax_bonus", 0) > 0]
+        if impl:
+            latest = impl[0]
+            print(f"    ✅ 最近分红: {latest.get('plan_profile', '?')} 股息率={latest.get('dividend_ratio', 0)*100:.2f}%")
+        else:
+            print(f"    ⚠️ 无已实施分红记录({len(dividend)}条)")
+    except Exception as e:
+        print(f"    ❌ {e}")
+        result["dividend"] = []
 
     # ── 衍生计算 ──
     print("\n  📊 衍生计算...")

@@ -257,6 +257,16 @@ def validate_data(code):
     h.check("资金流数据存在", len(fund_flow) > 0,
             detail=f"fund_flow={len(fund_flow)}条", level="warning")
 
+    # 10.1 股东人数数据（warning）
+    holder_num = d.get("holder_num", [])
+    h.check("股东人数数据存在", len(holder_num) > 0,
+            detail=f"holder_num={len(holder_num)}条", level="warning")
+
+    # 10.2 分红历史数据（warning）
+    dividend = d.get("dividend", [])
+    h.check("分红历史数据存在", len(dividend) > 0,
+            detail=f"dividend={len(dividend)}条", level="warning")
+
     _save_report(h)
     _print_summary(h)
     return h.report()
