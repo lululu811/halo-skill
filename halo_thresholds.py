@@ -187,10 +187,11 @@ def calc_halo_total(dim_scores: dict) -> float:
     return round(total, 2)
 
 
-def score_growth(growth: dict, ratios: dict) -> Optional[float]:
+def score_growth_breakdown(growth: dict, ratios: dict) -> dict:
     """
-    独立复算成长性总分。
-    缺少 revenue_yoy / net_profit_yoy / cf_to_profit / debt_ratio 时返回 None。
+    独立复算成长性子项与总分。
+    缺失字段按 0 计算（与历史行为一致，不返回 None）。
+    返回 {"4_1", "4_2", "4_3", "4_4", "total"}，供 generate_report 直接取子项。
     """
     # 4.1 营收增长
     rev_yoy = _safe_float(growth.get("revenue_yoy"), 0)
@@ -236,4 +237,9 @@ def score_growth(growth: dict, ratios: dict) -> Optional[float]:
     s_sustain = max(1, min(10, sustain))
 
     total = (s_rev + s_np + s_quality + s_sustain) / 4
-    return round(total, 1)
+    return {"4_1": s_rev, "4_2": s_np, "4_3": s_quality, "4_4": s_sustain, "total": round(total, 1)}
+
+
+def score_growth(growth: dict, ratios: dict) -> Optional[float]:
+    """独立复算成长性总分（委托给 score_growth_breakdown，向后兼容）。"""
+    return score_growth_breakdown(growth, ratios)["total"]

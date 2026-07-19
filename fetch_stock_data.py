@@ -674,19 +674,13 @@ def fetch_all(code):
     try:
         fund_flow = fetch_fund_flow(code, days=30)
         result["fund_flow"] = fund_flow
-        # 汇总近5日
+        # 汇总近5日（仅用于日志显示；JSON 中只保留逐日 fund_flow，金额单位为元）
         recent5 = fund_flow[-5:] if len(fund_flow) >= 5 else fund_flow
         main_total = sum(sf(f.get("main_net_inflow")) for f in recent5)
-        result["fund_flow_summary"] = {
-            "days": len(fund_flow),
-            "recent_5d_main_net": wan(main_total),
-            "recent_5d_main_unit": "万元",
-        }
         print(f"    ✅ {len(fund_flow)}日资金流 近5日主力={wan(main_total)}万")
     except Exception as e:
         print(f"    ❌ {e}")
         result["fund_flow"] = []
-        result["fund_flow_summary"] = {}
 
     # ── 衍生计算 ──
     print("\n  📊 衍生计算...")

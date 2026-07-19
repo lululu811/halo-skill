@@ -9,7 +9,7 @@ HALO V5.0 报告骨架生成器
 
 import json, os, sys
 from datetime import datetime
-from halo_thresholds import score_halo_dimensions, calc_halo_total, score_growth as _score_growth_impl
+from halo_thresholds import score_halo_dimensions, calc_halo_total, score_growth as _score_growth_impl, score_growth_breakdown as _score_growth_breakdown_impl
 
 # Harness 骨架校验
 import halo_harness
@@ -116,23 +116,22 @@ def score_halo(d):
 
 
 def score_growth(d):
-    """成长性评分（使用 halo_thresholds 共享阈值）"""
+    """成长性评分（子项与总分均来自 halo_thresholds 共享模块）"""
     g = d.get("growth", {})
     ratios = d.get("ratios", {})
 
-    total = _score_growth_impl(g, ratios)
+    bd = _score_growth_breakdown_impl(g, ratios)
 
-    if total is None:
+    if bd is None:
         # 数据缺失时降级
         scores = {f"4_{i}": 1 for i in range(1, 5)}
         scores["total"] = 0.0
         scores["rating"] = rating_10(0.0)
         return scores
 
-    # 为了保持向后兼容，子维度分数用占位值，total 和 rating 来自共享模块
-    scores = {f"4_{i}": 5 for i in range(1, 5)}  # 占位，实际值由共享模块内部计算
-    scores["total"] = total
-    scores["rating"] = rating_10(total)
+    scores = {"4_1": bd["4_1"], "4_2": bd["4_2"], "4_3": bd["4_3"], "4_4": bd["4_4"]}
+    scores["total"] = bd["total"]
+    scores["rating"] = rating_10(bd["total"])
     return scores
 
 
@@ -228,9 +227,10 @@ def generate_skeleton(json_path, qual_path=None):
     prev_rev = inc[1].get("营业收入", 0) if len(inc) > 1 else 0
     prev_np = inc[1].get("净利润", 0) if len(inc) > 1 else 0
     
-    # 资金流
-    ffs = d.get("fund_flow_summary", {})
-    main_5d = ffs.get("recent_5d_main_net", 0)
+    # 资金流：从逐日 fund_flow 计算近5日主力净流入（单位：元，符合 JSON 金额统一为元的约定）
+    _ff = d.get("fund_flow", [])
+    _recent5 = _ff[-5:] if len(_ff) >= 5 else _ff
+    main_5d = sum(float(f.get("main_net_inflow") or 0) for f in _recent5)
     
     # 研报统计
     reports = qual.get("reports", [])
