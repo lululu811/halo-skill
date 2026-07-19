@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 HALO V5.0 数据层 Harness
-验证 data/{code}.json 和 reports/{code}_skeleton.md 的完整性、一致性与正确性
+验证 data/{code}.json、reports/{code}_skeleton.md 和 reports/{code}_halo_v5.md 的完整性、一致性与正确性
 """
 
 import json
@@ -25,9 +25,15 @@ def _skeleton_path(code):
     return os.path.join(_project_root(), "reports", f"{code}_skeleton.md")
 
 
+def _report_path(code):
+    return os.path.join(_project_root(), "reports", f"{code}_halo_v5.md")
+
+
 def _harness_report_path(code, layer):
     if layer == "data":
         return os.path.join(_project_root(), "data", f"{code}_harness.json")
+    if layer == "report":
+        return os.path.join(_project_root(), "reports", f"{code}_report_harness.json")
     return os.path.join(_project_root(), "reports", f"{code}_harness.json")
 
 
@@ -76,7 +82,7 @@ def _save_report(harness):
 
 
 def _print_summary(harness):
-    print(f"\n[HALO Harness] {harness.code} — {harness.layer}层")
+    print(f"\n[HALO Harness] {harness.code} - {harness.layer}层")
     for c in harness.checks:
         if c["passed"]:
             icon = "✅"
@@ -205,7 +211,7 @@ def validate_data(code):
             detail=f"缺失: revenue_yoy={growth.get('revenue_yoy')}, net_profit_yoy={growth.get('net_profit_yoy')}",
             level="warning")
 
-    # 9. 评分计算复核（允许 ±0.1 浮点误差）— 使用 halo_thresholds 共享阈值
+    # 9. 评分计算复核（允许 ±0.1 浮点误差）- 使用 halo_thresholds 共享阈值
     json_halo_total = _safe_float(halo.get("total_score"))
     json_growth_total = _safe_float(growth.get("total_score"))
     dim_scores = score_halo_dimensions(halo) if has_dims and has_burden_raw and asset_type else None
@@ -309,7 +315,7 @@ def validate_skeleton(code):
             required_ratios = ["cf_to_profit", "debt_ratio"]
             has_ratios = all(k in ratios for k in required_ratios)
 
-            # 当 JSON 未存储 total_score 时，用复算值与骨架比对 — 使用 halo_thresholds 共享阈值
+            # 当 JSON 未存储 total_score 时，用复算值与骨架比对 - 使用 halo_thresholds 共享阈值
             dim_scores = score_halo_dimensions(halo) if has_dims and has_burden_raw and asset_type else None
             recalc_halo_total = calc_halo_total(dim_scores) if dim_scores is not None else None
             recalc_growth_total = score_growth(growth, ratios) if has_growth and has_ratios else None
@@ -392,16 +398,202 @@ def _find_number_in_text(text, number):
     return False
 
 
+# ── 最终报告校验（AI 填充后的 reports/{code}_halo_v5.md）──
+
+# 期望章节（关键片段，0-11章必齐，12章可选）
+EXPECTED_CHAPTERS = [
+    ("第零章", "执行摘要"),
+    ("一、", "公司概况"),
+    ("二、", "最新基本面"),
+    ("三、", "HALO框架六维"),
+    ("四、", "成长性分析"),
+    ("五、", "低淘汰率"),
+    ("六、", "滞胀防御"),
+    ("七、", "ESG评估"),
+    ("八、", "管理层质量"),
+    ("九、", "股东与资金面"),
+    ("十、", "风险评估"),
+    ("十一", "综合评估与投资建议"),
+]
+
+# 每章最小字数（基于 600519 标杆实际字数的 ~90%，防 AI 草草填）
+REPORT_CHAPTER_MIN_CHARS = {
+    "第零章": 1100,
+    "一、": 1000,
+    "二、": 1000,
+    "三、": 2600,
+    "四、": 1000,
+    "五、": 600,
+    "六、": 630,
+    "七、": 540,
+    "八、": 600,
+    "九、": 600,
+    "十、": 660,
+    "十一": 1640,
+}
+
+# 综合评分各维度权重（与 SKILL.md 综合评分公式一致）
+COMPREHENSIVE_WEIGHTS = [
+    ("HALO六维", 0.15, True),    # 归一化 ÷5×10
+    ("成长性", 0.15, False),
+    ("低淘汰率", 0.15, False),
+    ("滞胀防御", 0.10, False),
+    ("ESG", 0.10, False),
+    ("管理层", 0.10, False),
+    ("股东资金面", 0.05, False),
+    ("估值吸引力", 0.10, False),
+    ("风险", -0.10, False),       # 减分项
+]
+
+
+def _split_chapters(text):
+    """按 ## 标题分割章节，返回 [(标题, 字符数)]"""
+    chapters = []
+    current_title = None
+    current_len = 0
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if current_title is not None:
+                chapters.append((current_title, current_len))
+            current_title = line
+            current_len = len(line)
+        elif current_title is not None:
+            current_len += len(line) + 1
+    if current_title is not None:
+        chapters.append((current_title, current_len))
+    return chapters
+
+
+def _extract_score_from_line(line):
+    """从表格行提取 评分/满分 的评分值（如 3.85/5.0 -> 3.85）"""
+    m = re.search(r"(\d+\.?\d*)\s*/\s*\d+\.?\d*", line)
+    return float(m.group(1)) if m else None
+
+
+def _recalc_comprehensive_score(report):
+    """从第十一章 11.1 表格提取各维评分，按权重复算综合评分；任一维度缺失返回 None"""
+    # 定位 11.1 综合评级表格区间
+    start = report.find("11.1")
+    if start == -1:
+        start = report.find("十一、综合评估")
+    if start == -1:
+        return None
+    end = report.find("综合评分计算", start)
+    if end == -1:
+        end = len(report)
+    section = report[start:end]
+
+    total = 0.0
+    for keyword, weight, normalize in COMPREHENSIVE_WEIGHTS:
+        score = None
+        for line in section.splitlines():
+            if keyword in line and "|" in line:
+                score = _extract_score_from_line(line)
+                if score is not None:
+                    break
+        if score is None:
+            return None
+        if normalize:
+            score = score / 5 * 10
+        total += score * weight
+    return round(total, 2)
+
+
+def _extract_comprehensive_score(report):
+    """提取报告声明的综合评分（如 6.2/10 -> 6.2）"""
+    m = re.search(r"综合评分[：:]\s*(\d+\.?\d*)\s*/\s*10", report)
+    if m:
+        return float(m.group(1))
+    m = re.search(r"=\s*(\d+\.?\d*)\s*/\s*10\b", report)
+    if m:
+        return float(m.group(1))
+    return None
+
+
+def validate_report(code):
+    """校验 reports/{code}_halo_v5.md 的 AI 填充完整性与评分自洽性"""
+    h = Harness(code, "report")
+    report_path = _report_path(code)
+
+    # 1. 文件存在且非空（报告可能尚未生成，缺失为 warning 不阻断）
+    exists = os.path.exists(report_path) and os.path.getsize(report_path) > 0
+    h.check("最终报告存在", exists, detail=f"路径: {report_path}", level="warning")
+    if not exists:
+        _save_report(h)
+        _print_summary(h)
+        return h.report()
+
+    with open(report_path, "r", encoding="utf-8") as f:
+        report = f.read()
+
+    # 2. 无残留 AI/SERENITY 槽位（双括号 + 单括号两种格式）
+    leftover = re.findall(r"\{\{[A-Z][A-Z_0-9]+\}\}", report)
+    leftover += re.findall(r"(?<!\{)\{[A-Z][A-Z_0-9]+\}(?!\})", report)
+    h.check("无残留AI槽位", len(leftover) == 0,
+            detail=f"残留: {leftover[:5]}", level="error")
+
+    # 3. 章节齐备（0-11章必齐，只检查 ## 标题行，避免与 11.1 表格维度名冲突）
+    chapter_titles = [line for line in report.splitlines() if line.startswith("## ")]
+    missing_chapters = []
+    for key, frag in EXPECTED_CHAPTERS:
+        if not any(key in t or frag in t for t in chapter_titles):
+            missing_chapters.append(frag)
+    h.check("11章标题齐备", len(missing_chapters) == 0,
+            detail=f"缺失: {missing_chapters}", level="error")
+
+    # 3.1 第十二章产业链（可选，缺失仅 warning）
+    has_ch12 = "十二" in report and "产业链定位" in report
+    h.check("产业链章节存在", has_ch12,
+            detail="第十二章为可选，缺失建议先生成 serenity 数据", level="warning")
+
+    # 4. 各章字数下限
+    chapters = _split_chapters(report)
+    short_chapters = []
+    for ch_title, ch_len in chapters:
+        for key, min_chars in REPORT_CHAPTER_MIN_CHARS.items():
+            if key in ch_title and ch_len < min_chars:
+                short_chapters.append(f"{ch_title.strip()}({ch_len}字<{min_chars})")
+                break
+    h.check("各章字数达标", len(short_chapters) == 0,
+            detail=f"偏短: {short_chapters[:8]}", level="warning")
+
+    # 5. 综合评分自洽
+    recalc = _recalc_comprehensive_score(report)
+    reported = _extract_comprehensive_score(report)
+    if recalc is not None and reported is not None:
+        h.check("综合评分自洽", abs(recalc - reported) <= 0.5,
+                detail=f"报告={reported}, 复算={recalc:.2f}, 差={abs(recalc - reported):.2f}", level="warning")
+    elif reported is not None:
+        h.check("综合评分可复算", False,
+                detail="无法从第十一章提取全部维度评分，跳过自洽校验", level="warning")
+
+    # 6. 免责声明与有效期
+    h.check("包含免责声明", "免责声明" in report, level="warning")
+    h.check("包含30日有效期", "30日有效期" in report or "报告有效期30日" in report or "有效期至" in report,
+            level="warning")
+
+    # 7. 缺失标记不过多
+    missing_count = report.count("⚠️ 缺失")
+    h.check("缺失标记不过多", missing_count <= 10,
+            detail=f"缺失标记={missing_count}", level="warning")
+
+    _save_report(h)
+    _print_summary(h)
+    return h.report()
+
+
 def run_harness(code):
-    """依次运行数据层和骨架层校验，并保存组合报告"""
+    """依次运行数据层、骨架层、报告层校验，并保存组合报告"""
     data_result = validate_data(code)
     skeleton_result = validate_skeleton(code)
+    report_result = validate_report(code)
     combined = {
         "code": code,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "ok": data_result["ok"] and skeleton_result["ok"],
+        "ok": data_result["ok"] and skeleton_result["ok"] and report_result["ok"],
         "data_layer": data_result,
         "skeleton_layer": skeleton_result,
+        "report_layer": report_result,
     }
     path = os.path.join(_project_root(), "data", f"{code}_harness.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)

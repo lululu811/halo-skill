@@ -68,6 +68,57 @@ def _make_minimal_skeleton(code, tmp_dir, content):
     return path
 
 
+def _make_minimal_report(code, tmp_dir, content_override=None):
+    """在 tmp_dir/reports/{code}_halo_v5.md 写入一份可通过 validate_report 的最小报告
+
+    各维评分加权复算 = 6.18，报告声明 6.2/10，差 0.02 ≤ 0.5（自洽）。
+    """
+    reports_dir = os.path.join(tmp_dir, "reports")
+    os.makedirs(reports_dir, exist_ok=True)
+
+    # 11.1 综合评级表格（各维评分 + 综合评分计算段）
+    score_table = (
+        "### 📊 11.1 11维综合评级\n\n"
+        "| 📊 评估框架 | ⭐ 评分 | 🟢 评级 | ⚖️ 权重 | 📝 核心结论 |\n"
+        "|:---|:---:|:---:|:---:|:---|\n"
+        "| 🔷 HALO六维 | 3.85/5.0 | 🟡 强 | 15% | 测试 |\n"
+        "| 🌱 成长性 | 4.8/10 | 🔴 弱 | 15% | 测试 |\n"
+        "| 🏰 低淘汰率 | 9.0/10 | 🟢 极强 | 15% | 测试 |\n"
+        "| 🛡️ 滞胀防御 | 8.5/10 | 🟢 极强 | 10% | 测试 |\n"
+        "| 🌍 ESG | 7.0/10 | 🟡 强 | 10% | 测试 |\n"
+        "| 👔 管理层 | 7.5/10 | 🟡 强 | 10% | 测试 |\n"
+        "| 💰 股东资金面 | 5.0/10 | 🟠 中等 | 5% | 测试 |\n"
+        "| 💵 估值吸引力 | 7.0/10 | 🟡 强 | 10% | 测试 |\n"
+        "| ⚠️ 风险 | 3.0/10 | 🟡 中等风险 | -10% | 测试 |\n\n"
+        "### 📊 综合评分计算\n\n"
+        "**📊 综合评分：6.2/10（🟡 强）**\n"
+    )
+
+    # 各章（标题 + 填充至字数下限）
+    chapters = [
+        ("## 📋 第零章：执行摘要\n", "测试执行摘要内容。", 220),
+        ("## 📊 一、公司概况\n", "测试公司概况内容。", 150),
+        ("## 📰 二、最新基本面与消息面\n", "测试消息面内容。", 200),
+        ("## 🔷 三、HALO框架六维分析\n", "测试HALO分析内容。", 380),
+        ("## 🌱 四、成长性分析\n", "测试成长性内容。", 170),
+        ("## 🏰 五、低淘汰率五维分析\n", "测试护城河内容。", 140),
+        ("## 🛡️ 六、滞胀防御五维分析\n", "测试滞胀防御内容。", 120),
+        ("## 🌍 七、ESG评估\n", "测试ESG内容。", 145),
+        ("## 👔 八、管理层质量\n", "测试管理层内容。", 140),
+        ("## 💰 九、股东与资金面\n", "测试资金面内容。", 140),
+        ("## ⚠️ 十、风险评估\n", "测试风险内容。", 165),
+    ]
+    parts = [title + pad * n for title, pad, n in chapters]
+    parts.append("## 💡 十一、综合评估与投资建议\n" + score_table + "测试综合评估内容。" * 220)
+    parts.append("## ⚠️ 免责声明\n\n本报告仅供参考。报告有效期30日。")
+
+    content = content_override if content_override else "\n\n".join(parts)
+    path = os.path.join(reports_dir, f"{code}_halo_v5.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return path
+
+
 def test_validate_data_ok():
     code = "TEST0001"
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -282,6 +333,93 @@ def test_find_number_in_text_matches_expected_formats():
     assert halo_harness._find_number_in_text("整数 4", 4.0) is True
 
 
+# ── validate_report 测试 ──
+
+def test_validate_report_missing_file_warns():
+    """最终报告不存在时为 warning，不阻断 ok"""
+    code = "TEST0100"
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        with _patch_project_root(tmp_dir):
+            result = halo_harness.validate_report(code)
+        checks = {c["name"]: c for c in result["checks"]}
+        assert checks["最终报告存在"]["passed"] is False
+        assert checks["最终报告存在"]["level"] == "warning"
+        assert result["ok"] is True
+
+
+def test_validate_report_ok():
+    """完整的最小报告应通过全部校验"""
+    code = "TEST0101"
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        _make_minimal_report(code, tmp_dir)
+        with _patch_project_root(tmp_dir):
+            result = halo_harness.validate_report(code)
+        failed = [c["name"] for c in result["checks"] if not c["passed"]]
+        assert result["ok"] is True, f"未通过的检查: {failed}"
+
+
+def test_validate_report_leftover_slots_fails():
+    """残留 {{AI_*}} 槽位为 error"""
+    code = "TEST0102"
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        _make_minimal_report(code, tmp_dir)
+        path = os.path.join(tmp_dir, "reports", f"{code}_halo_v5.md")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("\n{{AI_LEFTOVER}} 残留槽位测试\n")
+        with _patch_project_root(tmp_dir):
+            result = halo_harness.validate_report(code)
+        checks = {c["name"]: c for c in result["checks"]}
+        assert checks["无残留AI槽位"]["passed"] is False
+        assert checks["无残留AI槽位"]["level"] == "error"
+        assert result["ok"] is False
+
+
+def test_validate_report_missing_chapter_fails():
+    """缺失 0-11 章中任一章为 error"""
+    code = "TEST0103"
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        _make_minimal_report(code, tmp_dir)
+        path = os.path.join(tmp_dir, "reports", f"{code}_halo_v5.md")
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+        # 删除"五、低淘汰率"整章
+        content = content.replace(
+            "## 🏰 五、低淘汰率五维分析\n" + "测试护城河内容。" * 140 + "\n\n", "")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        with _patch_project_root(tmp_dir):
+            result = halo_harness.validate_report(code)
+        checks = {c["name"]: c for c in result["checks"]}
+        assert checks["11章标题齐备"]["passed"] is False
+        assert checks["11章标题齐备"]["level"] == "error"
+        assert result["ok"] is False
+
+
+def test_validate_report_score_consistency():
+    """综合评分自洽校验：复算值与报告声明值差 ≤ 0.5"""
+    code = "TEST0104"
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        _make_minimal_report(code, tmp_dir)
+        with _patch_project_root(tmp_dir):
+            result = halo_harness.validate_report(code)
+        checks = {c["name"]: c for c in result["checks"]}
+        assert "综合评分自洽" in checks
+        assert checks["综合评分自洽"]["passed"] is True
+
+
+def test_run_harness_with_report():
+    """三层校验齐全时 run_harness 通过，且包含 report_layer"""
+    code = "TEST0105"
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        _make_minimal_data(code, tmp_dir)
+        _make_minimal_skeleton(code, tmp_dir, "# HALO 报告\n价格: 10.00 元\nPE: 15.0\nHALO总分: 3.60\n成长分: 6.5\n免责声明\n报告有效期30日\n")
+        _make_minimal_report(code, tmp_dir)
+        with _patch_project_root(tmp_dir):
+            result = halo_harness.run_harness(code)
+        assert result["ok"] is True
+        assert "report_layer" in result
+
+
 if __name__ == "__main__":
     test_validate_data_ok()
     test_validate_data_checks_json()
@@ -302,4 +440,10 @@ if __name__ == "__main__":
     test_validate_skeleton_missing_data_file_warns()
     test_find_number_in_text_false_positive_rounded_integer()
     test_find_number_in_text_matches_expected_formats()
+    test_validate_report_missing_file_warns()
+    test_validate_report_ok()
+    test_validate_report_leftover_slots_fails()
+    test_validate_report_missing_chapter_fails()
+    test_validate_report_score_consistency()
+    test_run_harness_with_report()
     print("✅ 基础接口测试通过")
