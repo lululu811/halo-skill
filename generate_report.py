@@ -695,7 +695,22 @@ def generate_skeleton(json_path, qual_path=None):
     w("{{AI_INVESTMENT_SECTION}}")
     w("")
     w("### 💰 估值分析\n")
-    w("{{AI_VALUATION_SECTION}}")
+    _val = d.get("valuation", {})
+    if _val:
+        w("| 📊 指标 | 当前值 | 历史分位 | 估值状态 |")
+        w("|:------:|:------:|:--------:|:--------:|")
+        _val_labels = {"pe": "PE(TTM)", "pb": "PB", "ps": "PS", "pcf": "PCF"}
+        for _vk, _vl in _val_labels.items():
+            _vi = _val.get(_vk)
+            if _vi and _vi.get("value"):
+                w(f"| {_vl} | {_vi.get('value')} | {_vi.get('percentile')}% | {_vi.get('status','')} |")
+        w("")
+        w("> 💡 历史分位越低表示当前估值在过去历史中越便宜（0%=最低，100%=最高）。")
+        w("")
+    else:
+        w("> ⚠️ 缺失：无估值分位数据")
+        w("")
+    w("> 💡 {{AI_VALUATION_ANALYSIS}}")
     w("")
     w("### 🔭 SWOT分析\n")
     w("{{AI_SWOT_SECTION}}")

@@ -267,6 +267,12 @@ def validate_data(code):
     h.check("分红历史数据存在", len(dividend) > 0,
             detail=f"dividend={len(dividend)}条", level="warning")
 
+    # 10.3 估值分位数据（warning）
+    valuation = d.get("valuation", {})
+    has_pe_percentile = bool(valuation.get("pe", {}).get("percentile"))
+    h.check("估值分位数据存在", has_pe_percentile,
+            detail=f"valuation keys={list(valuation.keys())}", level="warning")
+
     _save_report(h)
     _print_summary(h)
     return h.report()

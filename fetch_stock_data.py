@@ -335,6 +335,42 @@ def fetch_dividend_history(code):
         return []
 
 
+def fetch_valuation(code):
+    """个股 PE/PB 历史分位与估值状态（东财 RPT_VALUATIONSTATUS）
+
+    返回 {"pe": {value, percentile, status, date}, "pb": {...}, ...}，
+    percentile 为当前值在自身历史中的分位（0%=历史最低，100%=历史最高）。
+    """
+    url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+    params = {
+        "reportName": "RPT_VALUATIONSTATUS",
+        "columns": "ALL",
+        "filter": f'(SECURITY_CODE="{code}")',
+        "pageSize": "10",
+        "pageNumber": "1",
+    }
+    try:
+        r = em_get(url, params=params, timeout=10)
+        result = r.json().get("result", {})
+        data = result.get("data", []) if result else []
+        records = {}
+        # INDICATOR_TYPE: 1=PE, 2=PB, 3=PS, 4=PCF
+        _type_map = {"1": "pe", "2": "pb", "3": "ps", "4": "pcf"}
+        for d in (data or []):
+            key = _type_map.get(str(d.get("INDICATOR_TYPE")))
+            if not key or key in records:
+                continue
+            records[key] = {
+                "value": sf(d.get("INDEX_VALUE")),
+                "percentile": sf(d.get("INDEX_PERCENTILE")),
+                "status": d.get("VALATION_STATUS", ""),
+                "date": str(d.get("TRADE_DATE", ""))[:10],
+            }
+        return records
+    except Exception:
+        return {}
+
+
 # ══════════════════════════════════════════
 #  §6 HALO 计算 + 财务指标衍生
 # ══════════════════════════════════════════
@@ -712,6 +748,20 @@ def fetch_all(code):
     except Exception as e:
         print(f"    ❌ {e}")
         result["dividend"] = []
+
+    # 10. 估值分位（PE/PB 历史分位）
+    print("  [10/10] 估值分位（东财）...")
+    try:
+        valuation = fetch_valuation(code)
+        result["valuation"] = valuation
+        if valuation.get("pe"):
+            pe_v = valuation["pe"]
+            print(f"    ✅ PE={pe_v.get('value')} 分位={pe_v.get('percentile')}% {pe_v.get('status')}")
+        else:
+            print("    ⚠️ 无估值分位数据")
+    except Exception as e:
+        print(f"    ❌ {e}")
+        result["valuation"] = {}
 
     # ── 衍生计算 ──
     print("\n  📊 衍生计算...")
