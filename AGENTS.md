@@ -35,6 +35,8 @@ halo-skill/
 ├── generate_report.py          # 骨架生成器：JSON → reports/{code}_skeleton.md
 ├── integrate_serenity.py       # Serenity 手动集成到报告
 ├── bridge_a_stock_data.py      # a-stock-data 43 端点桥接配置
+├── halo_thresholds.py          # 评分阈值与权重（单一真相源，generate_report + halo_harness 共享）
+├── halo_harness.py             # 三层校验：data / skeleton / report
 ├── fill_300888.py              # 早期一次性填充脚本（已归档，勿复用）
 │
 ├── data/                       # 运行时数据输出（.gitignore 忽略 *.json）
@@ -48,6 +50,7 @@ halo-skill/
 │   └── {code}_halo_v5.md       # AI 填充后的最终报告
 │
 ├── baseline/                   # 鲁班打磨用基线（.gitignore 忽略）
+├── tests/                      # 测试（test_harness.py，仅标准库 assert）
 └── examples/                   # 展示材料
 ```
 
@@ -227,7 +230,7 @@ python test_data.py [股票代码]
 ### 7.3 脚本语法检查
 
 ```bash
-python3 -m py_compile fetch_stock_data.py fetch_qualitative.py generate_report.py generate_serenity.py integrate_serenity.py bridge_a_stock_data.py test_data.py
+python3 -m py_compile fetch_stock_data.py fetch_qualitative.py generate_report.py generate_serenity.py integrate_serenity.py bridge_a_stock_data.py halo_harness.py halo_thresholds.py test_data.py
 ```
 
 ---
@@ -302,7 +305,7 @@ python3 -m py_compile fetch_stock_data.py fetch_qualitative.py generate_report.p
 
 ## 12. 给 Agent 的开发建议
 
-1. **修改评分阈值**：只改 `generate_report.py` 中的 `score_halo()` / `score_growth()`，并同步更新 `SKILL.md` 与 `halo_v5.0.md` 附录。
+1. **修改评分阈值**：只改 `halo_thresholds.py` 中的阈值与权重（`HALO_DIMENSION_THRESHOLDS` / `GROWTH_REVENUE_THRESHOLDS` 等），并同步更新 `SKILL.md` 附录。`generate_report.py` 和 `halo_harness.py` 均从此模块导入，修改一处即可。
 2. **新增数据源**：优先在 `fetch_stock_data.py` 中按现有源结构追加，保持 JSON 输出字段兼容。
 3. **新增报告章节**：修改 `generate_report.py` 的 `generate_skeleton()`，并确保新增字段已写入 JSON。
 4. **不要改占位符前缀**：`{{AI_*}}` 和 `{{SERENITY_*}}` 是 AI 填充阶段识别槽位的关键约定。
